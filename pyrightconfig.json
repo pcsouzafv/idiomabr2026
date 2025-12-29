@@ -1,0 +1,25 @@
+{
+  "include": ["backend"],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.*"
+  ],
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "reportUnknownParameterType": false,
+  "reportUnknownArgumentType": false,
+  "reportUnknownLambdaType": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownMemberType": false,
+  "reportMissingTypeArgument": false,
+  "reportUnnecessaryIsInstance": false,
+  "reportUnnecessaryComparison": false,
+  "reportUnusedImport": true,
+  "reportUnusedClass": false,
+  "reportUnusedFunction": false,
+  "reportUnusedVariable": false,
+  "reportDeprecated": true,
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "basic"
+}

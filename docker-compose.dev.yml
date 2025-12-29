@@ -1,0 +1,72 @@
+# Docker Compose para desenvolvimento com hot-reload
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: idiomasbr-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: idiomasbr
+      POSTGRES_PASSWORD: idiomasbr123
+      POSTGRES_DB: idiomasbr
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U idiomasbr"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - idiomasbr-network-dev
+
+  # FastAPI Backend (Development with hot-reload)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: idiomasbr-backend-dev
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://idiomasbr:idiomasbr123@postgres:5432/idiomasbr
+      SECRET_KEY: dev-secret-key-change-in-production
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 10080
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - idiomasbr-network-dev
+
+  # Next.js Frontend (Development with hot-reload)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: idiomasbr-frontend-dev
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - idiomasbr-network-dev
+
+networks:
+  idiomasbr-network-dev:
+    driver: bridge
+
+volumes:
+  postgres_data_dev:

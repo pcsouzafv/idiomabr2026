@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 0, 0, 0;
+  --background-start-rgb: 249, 250, 251;
+  --background-end-rgb: 255, 255, 255;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: linear-gradient(
+    to bottom,
+    rgb(var(--background-start-rgb)),
+    rgb(var(--background-end-rgb))
+  );
+  min-height: 100vh;
+}
+
+/* Card flip animation */
+.card-flip {
+  perspective: 1000px;
+  min-height: 400px;
+}
+
+.card-flip-inner {
+  position: relative;
+  width: 100%;
+  min-height: 400px;
+  transition: transform 0.6s;
+  transform-style: preserve-3d;
+}
+
+.card-flip.flipped .card-flip-inner {
+  transform: rotateY(180deg);
+}
+
+.card-front,
+.card-back {
+  position: absolute;
+  width: 100%;
+  min-height: 400px;
+  backface-visibility: hidden;
+  border-radius: 1rem;
+}
+
+.card-front {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-back {
+  transform: rotateY(180deg);
+}
+
+/* Custom scrollbar for card back */
+.card-back::-webkit-scrollbar {
+  width: 6px;
+}
+
+.card-back::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.card-back::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 10px;
+}
+
+.card-back::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* Progress bar animation */
+.progress-bar {
+  transition: width 0.5s ease-out;
+}
+
+/* Streak fire animation */
+@keyframes flicker {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.1); }
+}
+
+.streak-fire {
+  animation: flicker 0.5s infinite;
+}
+
+/* Button hover effects */
+.btn-difficulty {
+  @apply px-6 py-3 rounded-lg font-semibold transition-all duration-200 transform;
+}
+
+.btn-difficulty:hover {
+  @apply scale-105;
+}
+
+.btn-difficulty:active {
+  @apply scale-95;
+}

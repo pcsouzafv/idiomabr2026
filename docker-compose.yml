@@ -1,0 +1,94 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: idiomasbr-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-idiomasbr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-idiomasbr123}
+      POSTGRES_DB: ${POSTGRES_DB:-idiomasbr}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-idiomasbr}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - idiomasbr-network
+
+  # Ollama (AI Local)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: idiomasbr-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - idiomasbr-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: idiomasbr-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-idiomasbr}:${POSTGRES_PASSWORD:-idiomasbr123}@postgres:5432/${POSTGRES_DB:-idiomasbr}
+      SECRET_KEY: ${SECRET_KEY:-sua-chave-secreta-muito-segura-aqui-123456}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 10080
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OLLAMA_URL: http://ollama:11434
+      USE_OLLAMA_FALLBACK: ${USE_OLLAMA_FALLBACK:-false}
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - backend_cache:/app/.cache  # Cache para APIs
+    networks:
+      - idiomasbr-network
+
+  # Next.js Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:8000
+    container_name: idiomasbr-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - idiomasbr-network
+
+networks:
+  idiomasbr-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  backend_cache:  # Volume para cache de APIs
+  ollama_data:    # Volume para modelos Ollama

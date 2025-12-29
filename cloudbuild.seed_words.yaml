@@ -1,0 +1,112 @@
+# Cloud Build config to seed the Cloud SQL (Postgres) database with word data
+# by running the existing SQLAlchemy importer against one or more CSV files.
+#
+# Usage example:
+# gcloud builds submit . --config cloudbuild.seed_words.yaml \
+#   --substitutions=_INSTANCE_CONNECTION_NAME="PROJECT:REGION:INSTANCE",_DATABASE_URL_SECRET_NAME="idiomasbr-database-url",_WORD_FILES="backend/data/seed_words_core_unique.csv,backend/data/seed_words_extra_unique_v3.csv"
+
+substitutions:
+  _INSTANCE_CONNECTION_NAME: ""
+  _DATABASE_URL_SECRET_NAME: ""
+  _WORD_FILES: ""
+
+steps:
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        if [[ -z "${_INSTANCE_CONNECTION_NAME}" ]]; then
+          echo "Erro: _INSTANCE_CONNECTION_NAME não definido"; exit 1
+        fi
+        if [[ -z "${_DATABASE_URL_SECRET_NAME}" ]]; then
+          echo "Erro: _DATABASE_URL_SECRET_NAME não definido"; exit 1
+        fi
+        if [[ -z "${_WORD_FILES}" ]]; then
+          echo "Erro: _WORD_FILES não definido"; exit 1
+        fi
+
+        echo "🔧 Instalando dependências (python + build deps + pg client)..."
+        apt-get update -y
+        apt-get install -y --no-install-recommends \
+          python3 python3-pip \
+          gcc libpq-dev \
+          postgresql-client \
+          curl ca-certificates
+
+        echo "🔌 Baixando cloud-sql-proxy..."
+        PROXY_URL="https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.11.4/cloud-sql-proxy.linux.amd64"
+        curl -fsSL "$PROXY_URL" -o /usr/local/bin/cloud-sql-proxy
+        chmod +x /usr/local/bin/cloud-sql-proxy
+
+        echo "🔐 Lendo DATABASE_URL do Secret Manager (${_DATABASE_URL_SECRET_NAME})..."
+        export DATABASE_URL_RAW
+        DATABASE_URL_RAW="$(gcloud secrets versions access latest --secret="${_DATABASE_URL_SECRET_NAME}")"
+
+        echo "🧩 Normalizando DATABASE_URL para usar o proxy (127.0.0.1:5432)..."
+        export DATABASE_URL
+        DATABASE_URL="$(python3 - <<'PY'
+import os
+from urllib.parse import urlparse, unquote, quote
+raw = os.environ.get('DATABASE_URL_RAW') or ''
+if not raw:
+    raise SystemExit('DATABASE_URL_RAW vazio')
+# aceitar postgres:// e postgresql://
+raw = raw.strip()
+if raw.startswith('postgres://'):
+    raw = 'postgresql://' + raw[len('postgres://'):]
+
+u = urlparse(raw)
+if u.scheme != 'postgresql':
+    raise SystemExit(f'Scheme inválido: {u.scheme}')
+user = unquote(u.username or '')
+pwd = unquote(u.password or '')
+db = (u.path or '/').lstrip('/')
+if not user or not db:
+    raise SystemExit('DATABASE_URL precisa conter user e database')
+
+auth = quote(user)
+if pwd:
+    auth += ':' + quote(pwd)
+
+print(f"postgresql://{auth}@127.0.0.1:5432/{quote(db)}")
+PY
+)"
+
+        echo "🚀 Iniciando cloud-sql-proxy para ${_INSTANCE_CONNECTION_NAME} (porta 5432)..."
+        cloud-sql-proxy "${_INSTANCE_CONNECTION_NAME}" --port 5432 &
+        PROXY_PID=$!
+
+        echo "⏳ Aguardando Cloud SQL ficar pronto..."
+        for i in {1..30}; do
+          if pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
+            break
+          fi
+          sleep 1
+        done
+
+        echo "📦 Instalando dependências Python do backend..."
+        python3 -m pip install --no-cache-dir -r backend/requirements.txt
+
+        echo "🌱 Iniciando seed de palavras: ${_WORD_FILES}"
+        IFS=',' read -ra FILES <<< "${_WORD_FILES}"
+        for f in "${FILES[@]}"; do
+          f="${f//\r/}"
+          f="${f//\n/}"
+          if [[ -z "$f" ]]; then
+            continue
+          fi
+          if [[ ! -f "$f" ]]; then
+            echo "Erro: arquivo CSV não encontrado: $f"; exit 1
+          fi
+          echo "➡️ Importando: $f"
+          python3 backend/import_words.py "$f"
+        done
+
+        echo "🧹 Encerrando proxy..."
+        kill "$PROXY_PID" || true
+
+        echo "✅ Seed concluído com sucesso."
+
+options:
+  logging: CLOUD_LOGGING_ONLY
