@@ -23,6 +23,7 @@ class AdminStats(BaseModel):
 class UserResponse(BaseModel):
     id: int
     email: EmailStr
+    phone_number: Optional[str] = None
     name: str
     is_active: bool
     is_admin: bool
@@ -39,6 +40,7 @@ class UserResponse(BaseModel):
 class UserUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[EmailStr] = None
+    phone_number: Optional[str] = None
     is_active: Optional[bool] = None
     is_admin: Optional[bool] = None
     daily_goal: Optional[int] = None
@@ -46,6 +48,7 @@ class UserUpdate(BaseModel):
 
 class UserCreateAdmin(BaseModel):
     email: EmailStr
+    phone_number: str
     name: str
     password: str
     is_active: Optional[bool] = True

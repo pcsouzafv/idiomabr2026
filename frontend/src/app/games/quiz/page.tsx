@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -15,7 +15,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { gamesApi } from '@/lib/api';
+import { gamesApi, wordsApi } from '@/lib/api';
 
 interface QuizQuestion {
   word_id: number;
@@ -49,6 +49,51 @@ interface QuizResult {
   new_achievements: AchievementSummary[];
 }
 
+interface WordDetails {
+  id: number;
+  english: string;
+  ipa: string | null;
+  portuguese: string;
+  level: string;
+
+  word_type: string | null;
+  definition_en: string | null;
+  definition_pt: string | null;
+  synonyms: string | null;
+  antonyms: string | null;
+
+  example_en: string | null;
+  example_pt: string | null;
+  example_sentences: string | null;
+  usage_notes: string | null;
+  collocations: string | null;
+
+  tags: string | null;
+  audio_url: string | null;
+
+  is_learned: boolean;
+  next_review: string | null;
+  total_reviews: number;
+  correct_count: number;
+}
+
+function splitList(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function buildFallbackExample(wordEn: string, wordPt: string) {
+  const safeEn = wordEn.trim();
+  const safePt = wordPt.trim();
+  return {
+    example_en: `The word "${safeEn}" means "${safePt}".`,
+    example_pt: `A palavra "${safeEn}" significa "${safePt}".`,
+  };
+}
+
 export default function QuizPage() {
   const searchParams = useSearchParams();
   const level = searchParams.get('level');
@@ -56,6 +101,7 @@ export default function QuizPage() {
   const [session, setSession] = useState<QuizSession | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<number[]>([]);
+  // -1 = timeout
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [showResult, setShowResult] = useState(false);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
@@ -63,6 +109,29 @@ export default function QuizPage() {
   const [result, setResult] = useState<QuizResult | null>(null);
   const [timeLeft, setTimeLeft] = useState(30);
   const [timerActive, setTimerActive] = useState(false);
+
+  const [baseTotal, setBaseTotal] = useState<number>(0);
+  const [repeatQueue, setRepeatQueue] = useState<QuizQuestion[]>([]);
+  const repeatWordIdsRef = useRef<Set<number>>(new Set());
+  const repeatQueueRef = useRef<QuizQuestion[]>([]);
+
+  const answersRef = useRef<number[]>([]);
+
+  const [wordDetails, setWordDetails] = useState<WordDetails | null>(null);
+  const [wordDetailsLoading, setWordDetailsLoading] = useState(false);
+
+  const isAnswered = selectedAnswer !== null;
+  const isTimeout = selectedAnswer === -1;
+
+  const isReviewPhase = baseTotal ? currentIndex >= baseTotal : false;
+
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
+
+  useEffect(() => {
+    repeatQueueRef.current = repeatQueue;
+  }, [repeatQueue]);
 
   const startQuiz = useCallback(async () => {
     try {
@@ -73,12 +142,16 @@ export default function QuizPage() {
       });
       const data: QuizSession = response.data;
       setSession(data);
+      setBaseTotal(data.questions.length);
+      setRepeatQueue([]);
+      repeatWordIdsRef.current = new Set();
       setCurrentIndex(0);
       setAnswers([]);
       setSelectedAnswer(null);
       setShowResult(false);
       setIsCorrect(null);
       setResult(null);
+      setWordDetails(null);
       setTimeLeft(30);
       setTimerActive(true);
     } catch (error) {
@@ -101,7 +174,7 @@ export default function QuizPage() {
         if (prev <= 1) {
           // Tempo esgotado - próxima questão
           handleTimeout();
-          return 30;
+          return 0;
         }
         return prev - 1;
       });
@@ -110,53 +183,112 @@ export default function QuizPage() {
     return () => clearInterval(interval);
   }, [timerActive, timeLeft, currentIndex]);
 
+  const loadWordDetails = useCallback(async (wordId: number) => {
+    try {
+      setWordDetailsLoading(true);
+      const response = await wordsApi.getWord(wordId);
+      setWordDetails(response.data as WordDetails);
+    } catch (error) {
+      console.error('Error loading word details:', error);
+      setWordDetails(null);
+    } finally {
+      setWordDetailsLoading(false);
+    }
+  }, []);
+
   const handleTimeout = () => {
     if (!session) return;
-    const newAnswers = [...answers, -1]; // -1 indica timeout
-    setAnswers(newAnswers);
-    
-    if (currentIndex < session.questions.length - 1) {
-      setCurrentIndex(currentIndex + 1);
-      setTimeLeft(30);
-    } else {
-      submitQuiz(newAnswers);
-    }
+    if (selectedAnswer !== null) return;
+
+    setSelectedAnswer(-1);
+    setTimerActive(false);
+    setIsCorrect(false);
+    loadWordDetails(session.questions[currentIndex].word_id);
+
+    setAnswers((prev) => {
+      const newAnswers = [...prev, -1]; // -1 indica timeout
+
+      // Só agenda repetição durante a fase “principal” (antes da revisão)
+      if (currentIndex < baseTotal) {
+        const q = session.questions[currentIndex];
+        if (!repeatWordIdsRef.current.has(q.word_id)) {
+          repeatWordIdsRef.current.add(q.word_id);
+          setRepeatQueue((rq) => [...rq, q]);
+        }
+      }
+
+      return newAnswers;
+    });
   };
 
   const handleAnswer = async (optionIndex: number) => {
     if (selectedAnswer !== null || !session) return;
-    
+
     setSelectedAnswer(optionIndex);
     setTimerActive(false);
-    
+
     const question = session.questions[currentIndex];
     const correct = question.options[optionIndex] === question.correct_answer;
     setIsCorrect(correct);
-    
-    if (correct) {
-      // Animação de acerto
+    loadWordDetails(question.word_id);
+
+    if (correct && !isReviewPhase) {
+      // Animação de acerto (somente no quiz “principal”)
       confetti({
         particleCount: 50,
         spread: 60,
-        origin: { y: 0.7 }
+        origin: { y: 0.7 },
       });
     }
-    
-    const newAnswers = [...answers, optionIndex];
-    setAnswers(newAnswers);
-    
-    // Esperar um pouco para mostrar o resultado
-    setTimeout(() => {
-      if (currentIndex < session.questions.length - 1) {
-        setCurrentIndex(currentIndex + 1);
-        setSelectedAnswer(null);
-        setIsCorrect(null);
-        setTimeLeft(30);
-        setTimerActive(true);
-      } else {
-        submitQuiz(newAnswers);
+
+    if (!correct && currentIndex < baseTotal) {
+      if (!repeatWordIdsRef.current.has(question.word_id)) {
+        repeatWordIdsRef.current.add(question.word_id);
+        setRepeatQueue((rq) => [...rq, question]);
       }
-    }, 1500);
+    }
+
+    setAnswers((prev) => [...prev, optionIndex]);
+  };
+
+  const advanceAfterAnswer = () => {
+    if (!session) return;
+    if (selectedAnswer === null) return;
+
+    // Se terminou a fase principal e há itens para revisar,
+    // adiciona uma “revisão rápida” ao final (não conta na pontuação).
+    const queuedRepeats = repeatQueueRef.current;
+
+    if (currentIndex === baseTotal - 1 && queuedRepeats.length > 0) {
+      setSession((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          questions: [...prev.questions, ...queuedRepeats],
+          total: prev.total + queuedRepeats.length,
+        };
+      });
+      setRepeatQueue([]);
+      setCurrentIndex((i) => i + 1);
+      setSelectedAnswer(null);
+      setIsCorrect(null);
+      setWordDetails(null);
+      setTimeLeft(30);
+      setTimerActive(true);
+      return;
+    }
+
+    if (currentIndex < session.questions.length - 1) {
+      setCurrentIndex((i) => i + 1);
+      setSelectedAnswer(null);
+      setIsCorrect(null);
+      setWordDetails(null);
+      setTimeLeft(30);
+      setTimerActive(true);
+      return;
+    }
+
+    submitQuiz(answersRef.current);
   };
 
   const submitQuiz = async (finalAnswers: number[]) => {
@@ -251,6 +383,33 @@ export default function QuizPage() {
               </div>
             )}
 
+            {result.incorrect_words.length > 0 && (
+              <div className="bg-gray-700/30 border border-gray-700 rounded-xl p-4 mb-6 text-left">
+                <p className="text-gray-200 font-medium mb-3">Para revisar</p>
+                <div className="space-y-2 max-h-40 overflow-auto pr-1">
+                  {result.incorrect_words.slice(0, 8).map((item, idx) => (
+                    <div key={`${item.word}-${idx}`} className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-white font-semibold">{item.word}</p>
+                        <p className="text-xs text-gray-400">
+                          Correto: <span className="text-gray-200">{item.correct_answer}</span>
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-400">Você</p>
+                        <p className="text-xs text-gray-200">{item.your_answer}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {result.incorrect_words.length > 8 && (
+                  <p className="text-xs text-gray-500 mt-3">
+                    +{result.incorrect_words.length - 8} outras
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-3">
               <Link
                 href="/games"
@@ -286,6 +445,28 @@ export default function QuizPage() {
   }
 
   const question = session.questions[currentIndex];
+
+  const chosenText = (() => {
+    if (!isAnswered) return null;
+    if (selectedAnswer === -1) return '(tempo esgotado)';
+    return question.options[selectedAnswer] ?? null;
+  })();
+
+  const synonyms = splitList(wordDetails?.synonyms);
+  const antonyms = splitList(wordDetails?.antonyms);
+  const tags = splitList(wordDetails?.tags);
+
+  const effectiveExample = (() => {
+    const en = wordDetails?.example_en;
+    const pt = wordDetails?.example_pt;
+    if (en || pt) {
+      return {
+        example_en: en,
+        example_pt: pt,
+      };
+    }
+    return buildFallbackExample(question.english, question.correct_answer);
+  })();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
@@ -334,6 +515,12 @@ export default function QuizPage() {
             {/* Pergunta */}
             <div className="text-center">
               <p className="text-gray-400 mb-2">Qual é a tradução de:</p>
+              {isReviewPhase && (
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-xs font-medium mb-3">
+                  <Zap className="w-4 h-4" />
+                  Revisão rápida (não conta na pontuação)
+                </div>
+              )}
               <button
                 onClick={() => speakWord(question.english)}
                 className="group"
@@ -383,6 +570,149 @@ export default function QuizPage() {
                 );
               })}
             </div>
+
+            {/* Explicação */}
+            {isAnswered && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-gray-800/60 border border-gray-700 rounded-2xl p-5"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      {isTimeout ? (
+                        <Clock className="w-5 h-5 text-yellow-400" />
+                      ) : isCorrect ? (
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                      ) : (
+                        <XCircle className="w-5 h-5 text-red-400" />
+                      )}
+                      <p className="text-white font-semibold">
+                        {isTimeout ? 'Tempo esgotado' : isCorrect ? 'Correto' : 'Quase lá'}
+                      </p>
+                    </div>
+
+                    <p className="text-sm text-gray-300">
+                      <span className="text-gray-400">Tradução correta:</span>{' '}
+                      <span className="font-semibold text-white">{question.correct_answer}</span>
+                    </p>
+                    <p className="text-sm text-gray-400">
+                      Sua resposta: <span className="text-gray-200">{chosenText}</span>
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => speakWord(question.english)}
+                    className="px-3 py-2 rounded-xl bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium transition"
+                  >
+                    Ouvir
+                  </button>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="bg-gray-900/30 rounded-xl p-3 border border-gray-700/60">
+                      <p className="text-xs text-gray-400 mb-1">Definição (PT)</p>
+                      <p className="text-sm text-gray-200">
+                        {wordDetailsLoading
+                          ? 'Carregando...'
+                          : wordDetails?.definition_pt || 'Sem definição cadastrada ainda.'}
+                      </p>
+                    </div>
+                    <div className="bg-gray-900/30 rounded-xl p-3 border border-gray-700/60">
+                      <p className="text-xs text-gray-400 mb-1">Definition (EN)</p>
+                      <p className="text-sm text-gray-200">
+                        {wordDetailsLoading
+                          ? 'Carregando...'
+                          : wordDetails?.definition_en || 'No definition available yet.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {wordDetails?.usage_notes && (
+                    <div className="bg-gray-900/30 rounded-xl p-3 border border-gray-700/60">
+                      <p className="text-xs text-gray-400 mb-1">Dica de uso</p>
+                      <p className="text-sm text-gray-200">{wordDetails.usage_notes}</p>
+                    </div>
+                  )}
+
+                  <div className="bg-gray-900/30 rounded-xl p-3 border border-gray-700/60">
+                    <p className="text-xs text-gray-400 mb-2">Exemplo</p>
+                    <p className="text-sm text-gray-200">{effectiveExample.example_en}</p>
+                    <p className="text-sm text-gray-400 mt-1">{effectiveExample.example_pt}</p>
+                  </div>
+
+                  {(synonyms.length > 0 || antonyms.length > 0) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {synonyms.length > 0 && (
+                        <div className="bg-gray-900/30 rounded-xl p-3 border border-gray-700/60">
+                          <p className="text-xs text-gray-400 mb-2">Sinônimos</p>
+                          <div className="flex flex-wrap gap-2">
+                            {synonyms.slice(0, 8).map((s) => (
+                              <span
+                                key={s}
+                                className="px-2 py-1 rounded-lg bg-gray-700/60 text-gray-200 text-xs"
+                              >
+                                {s}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {antonyms.length > 0 && (
+                        <div className="bg-gray-900/30 rounded-xl p-3 border border-gray-700/60">
+                          <p className="text-xs text-gray-400 mb-2">Antônimos</p>
+                          <div className="flex flex-wrap gap-2">
+                            {antonyms.slice(0, 8).map((s) => (
+                              <span
+                                key={s}
+                                className="px-2 py-1 rounded-lg bg-gray-700/60 text-gray-200 text-xs"
+                              >
+                                {s}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2 text-xs text-gray-400">
+                    {wordDetails?.word_type && (
+                      <span className="px-2 py-1 rounded-lg bg-gray-700/60 text-gray-200">
+                        {wordDetails.word_type}
+                      </span>
+                    )}
+                    {wordDetails?.level && (
+                      <span className="px-2 py-1 rounded-lg bg-gray-700/60 text-gray-200">
+                        Nível {wordDetails.level}
+                      </span>
+                    )}
+                    {tags.slice(0, 6).map((t) => (
+                      <span key={t} className="px-2 py-1 rounded-lg bg-gray-700/60 text-gray-200">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Próximo */}
+            {isAnswered && (
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    // Solta o usuário para seguir (ou finalizar) quando ele estiver pronto.
+                    advanceAfterAnswer();
+                  }}
+                  className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition"
+                >
+                  {currentIndex < session.questions.length - 1 ? 'Próxima' : 'Finalizar'}
+                </button>
+              </div>
+            )}
           </motion.div>
         </AnimatePresence>
       </main>

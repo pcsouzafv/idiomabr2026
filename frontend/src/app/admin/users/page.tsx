@@ -10,6 +10,7 @@ interface User {
   id: number;
   name: string;
   email: string;
+  phone_number?: string | null;
   is_active: boolean;
   is_admin: boolean;
   current_streak: number;
@@ -20,6 +21,7 @@ interface User {
 interface CreateUserPayload {
   name: string;
   email: string;
+  phone_number: string;
   password: string;
   is_active: boolean;
   is_admin: boolean;
@@ -231,6 +233,7 @@ export default function AdminUsersPage() {
                       <th className="text-left py-3 px-4 font-semibold text-gray-700">ID</th>
                       <th className="text-left py-3 px-4 font-semibold text-gray-700">Nome</th>
                       <th className="text-left py-3 px-4 font-semibold text-gray-700">Email</th>
+                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Telefone</th>
                       <th className="text-center py-3 px-4 font-semibold text-gray-700">Streak</th>
                       <th className="text-center py-3 px-4 font-semibold text-gray-700">Meta</th>
                       <th className="text-center py-3 px-4 font-semibold text-gray-700">Status</th>
@@ -249,6 +252,7 @@ export default function AdminUsersPage() {
                           )}
                         </td>
                         <td className="py-3 px-4 text-gray-600">{u.email}</td>
+                        <td className="py-3 px-4 text-gray-600">{u.phone_number || '—'}</td>
                         <td className="py-3 px-4 text-center">
                           <span className="font-bold text-orange-600">🔥 {u.current_streak}</span>
                         </td>
@@ -353,6 +357,7 @@ function UserCreateModal({
   const [formData, setFormData] = useState<CreateUserPayload>({
     name: "",
     email: "",
+    phone_number: "",
     password: "",
     is_active: true,
     is_admin: false,
@@ -391,6 +396,19 @@ function UserCreateModal({
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 title="Email"
+                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Telefone *</label>
+              <input
+                type="tel"
+                required
+                value={formData.phone_number}
+                onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
+                title="Telefone"
+                placeholder="+55 11 99999-9999"
                 className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
             </div>
@@ -471,6 +489,7 @@ function UserEditModal({ user, onClose, onSave }: { user: User; onClose: () => v
   const [formData, setFormData] = useState<Partial<User>>({
     name: user.name,
     email: user.email,
+    phone_number: user.phone_number ?? '',
     daily_goal: user.daily_goal,
     is_active: user.is_active,
     is_admin: user.is_admin,
@@ -508,6 +527,18 @@ function UserEditModal({ user, onClose, onSave }: { user: User; onClose: () => v
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 title="Email"
+                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Telefone</label>
+              <input
+                type="tel"
+                value={formData.phone_number ?? ''}
+                onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
+                title="Telefone"
+                placeholder="+55 11 99999-9999"
                 className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
             </div>

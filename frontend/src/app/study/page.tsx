@@ -277,6 +277,36 @@ export default function StudyPage() {
     }
   };
 
+  // Função para processar tradução palavra-por-palavra
+  const formatWordByWordTranslation = (ptTranslation: string): JSX.Element | null => {
+    if (!ptTranslation) return null;
+    
+    // Verifica se a tradução já está no formato [palavra] [palavra]
+    const hasWordByWord = ptTranslation.includes('[') && ptTranslation.includes(']');
+    
+    if (hasWordByWord) {
+      const parts = ptTranslation.split(/(\[[^\]]+\])/);
+      return (
+        <span className="inline-flex flex-wrap gap-1">
+          {parts.map((part, idx) => {
+            if (part.startsWith('[') && part.endsWith(']')) {
+              const word = part.slice(1, -1);
+              return (
+                <span key={idx} className="inline-block px-1.5 py-0.5 bg-white/20 rounded text-xs">
+                  {word}
+                </span>
+              );
+            }
+            return <span key={idx} className="text-xs opacity-80">{part}</span>;
+          })}
+        </span>
+      );
+    }
+    
+    // Caso contrário, mostra o texto normal
+    return <span className="text-xs opacity-80">{ptTranslation}</span>;
+  };
+
   // Detecta tipo de palavra baseado em padrões
   const detectWordType = (word: string): string => {
     const lowerWord = word.toLowerCase();
@@ -836,9 +866,9 @@ export default function StudyPage() {
               }`}
               onClick={handleFlip}
             >
-              <div className="card-flip-inner min-h-[300px]">
+              <div className="card-flip-inner min-h-[400px]">
                 {/* Front */}
-                <div className="card-front bg-white rounded-2xl shadow-xl p-8 flex flex-col items-center justify-center">
+                <div className="card-front bg-white rounded-2xl shadow-xl p-8 flex flex-col items-center justify-center min-h-[400px]">
                   <p className="text-sm text-gray-500 mb-4">
                     {isEnToPort ? 'Inglês' : 'Português'}
                   </p>
@@ -870,21 +900,21 @@ export default function StudyPage() {
                 </div>
 
                 {/* Back */}
-                <div className="card-back bg-gradient-to-br from-primary-500 to-primary-600 rounded-2xl shadow-xl p-6 overflow-y-auto max-h-[600px] text-white">
-                  <div className="space-y-4">
+                <div className="card-back bg-gradient-to-br from-primary-500 to-primary-600 rounded-2xl shadow-xl p-4 overflow-y-auto max-h-[700px] text-white">
+                  <div className="space-y-2 pb-2">
                     {/* Cabeçalho */}
-                    <div className="text-center border-b border-white/20 pb-4">
-                      <p className="text-sm opacity-80 mb-2">
+                    <div className="text-center border-b border-white/20 pb-2">
+                      <p className="text-xs opacity-70 mb-0.5">
                         {isEnToPort ? 'Português' : 'Inglês'}
                       </p>
-                      <h2 className="text-4xl font-bold mb-2">
+                      <h2 className="text-2xl font-bold mb-1">
                         {backText}
                       </h2>
                       {!isEnToPort && currentCard.word.ipa && (
-                        <p className="text-xl opacity-80">/{currentCard.word.ipa}/</p>
+                        <p className="text-base opacity-80 mb-1">/{currentCard.word.ipa}/</p>
                       )}
                       {currentCard.word.word_type && (
-                        <span className="inline-block mt-2 px-3 py-1 bg-white/20 rounded-full text-xs font-semibold">
+                        <span className="inline-block px-2.5 py-0.5 bg-white/20 rounded-full text-xs font-semibold uppercase">
                           {currentCard.word.word_type}
                         </span>
                       )}
@@ -892,8 +922,8 @@ export default function StudyPage() {
 
                     {/* Definição */}
                     {(currentCard.word.definition_en || currentCard.word.definition_pt) && (
-                      <div className="bg-white/10 rounded-lg p-3">
-                        <p className="text-xs uppercase tracking-wide opacity-70 mb-1">Definição</p>
+                      <div className="bg-white/10 rounded-lg p-2">
+                        <p className="text-xs uppercase tracking-wide opacity-70 mb-1">DEFINIÇÃO</p>
                         {isEnToPort && currentCard.word.definition_pt && (
                           <p className="text-sm leading-relaxed">{currentCard.word.definition_pt}</p>
                         )}
@@ -905,17 +935,17 @@ export default function StudyPage() {
 
                     {/* Sinônimos e Antônimos */}
                     {(currentCard.word.synonyms || currentCard.word.antonyms) && (
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1.5">
                         {currentCard.word.synonyms && (
                           <div className="bg-white/10 rounded-lg p-2">
-                            <p className="text-xs uppercase tracking-wide opacity-70 mb-1">Sinônimos</p>
-                            <p className="text-xs">{currentCard.word.synonyms}</p>
+                            <p className="text-xs uppercase tracking-wide opacity-70 mb-1">SINÔNIMOS</p>
+                            <p className="text-sm">{currentCard.word.synonyms}</p>
                           </div>
                         )}
                         {currentCard.word.antonyms && (
                           <div className="bg-white/10 rounded-lg p-2">
-                            <p className="text-xs uppercase tracking-wide opacity-70 mb-1">Antônimos</p>
-                            <p className="text-xs">{currentCard.word.antonyms}</p>
+                            <p className="text-xs uppercase tracking-wide opacity-70 mb-1">ANTÔNIMOS</p>
+                            <p className="text-sm">{currentCard.word.antonyms}</p>
                           </div>
                         )}
                       </div>
@@ -923,33 +953,59 @@ export default function StudyPage() {
 
                     {/* Exemplos */}
                     {currentCard.word.example_sentences ? (
-                      <div className="bg-white/10 rounded-lg p-3">
-                        <p className="text-xs uppercase tracking-wide opacity-70 mb-2">Exemplos</p>
+                      <div className="bg-white/10 rounded-lg p-2">
+                        <p className="text-xs uppercase tracking-wide opacity-70 mb-1.5">EXEMPLOS</p>
                         <div className="space-y-2">
-                          {JSON.parse(currentCard.word.example_sentences).slice(0, 3).map((ex: any, idx: number) => (
-                            <div key={idx} className="text-sm">
-                              <p className="italic">&quot;{ex.en}&quot;</p>
-                              <p className="opacity-70 text-xs mt-1">{ex.pt}</p>
+                          {JSON.parse(currentCard.word.example_sentences).slice(0, 2).map((ex: any, idx: number) => (
+                            <div key={idx} className="border-b border-white/10 last:border-0 pb-2 last:pb-0">
+                              <p className="text-sm italic font-medium mb-0.5">&quot;{ex.en}&quot;</p>
+                              <div className="leading-relaxed text-xs mb-1">
+                                {formatWordByWordTranslation(ex.pt)}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  speakWord(ex.en);
+                                }}
+                                className="flex items-center gap-1 px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-xs transition"
+                              >
+                                <Volume2 className="h-3 w-3" />
+                                Ouvir frase
+                              </button>
                             </div>
                           ))}
                         </div>
                       </div>
                     ) : currentCard.word.example_en && (
                       <div className="bg-white/10 rounded-lg p-3">
-                        <p className="text-xs uppercase tracking-wide opacity-70 mb-1">Exemplo</p>
-                        <p className="italic text-sm">&quot;{currentCard.word.example_en}&quot;</p>
+                        <p className="text-xs uppercase tracking-wide opacity-70 mb-2">EXEMPLOS</p>
+                        <p className="text-sm italic font-medium mb-1">&quot;{currentCard.word.example_en}&quot;</p>
                         {currentCard.word.example_pt && (
-                          <p className="text-xs opacity-70 mt-1">{currentCard.word.example_pt}</p>
+                          <div className="mt-2 leading-relaxed text-xs mb-2">
+                            {formatWordByWordTranslation(currentCard.word.example_pt)}
+                          </div>
                         )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            speakWord(currentCard.word.example_en || '');
+                          }}
+                          className="flex items-center gap-1 px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-xs transition mt-2"
+                        >
+                          <Volume2 className="h-3 w-3" />
+                          Ouvir frase
+                        </button>
                       </div>
                     )}
 
                     {/* Collocations */}
                     {currentCard.word.collocations && (
-                      <div className="bg-white/10 rounded-lg p-3">
-                        <p className="text-xs uppercase tracking-wide opacity-70 mb-2">Colocações Comuns</p>
-                        <div className="flex flex-wrap gap-2">
-                          {JSON.parse(currentCard.word.collocations).slice(0, 6).map((coll: string, idx: number) => (
+                      <div className="bg-white/10 rounded-lg p-2">
+                        <p className="text-xs uppercase tracking-wide opacity-70 mb-1">COLOCAÇÕES COMUNS</p>
+                        <div className="flex flex-wrap gap-1">
+                          {JSON.parse(currentCard.word.collocations).slice(0, 4).map((coll: string, idx: number) => (
                             <span key={idx} className="px-2 py-1 bg-white/20 rounded text-xs">
                               {coll}
                             </span>
@@ -960,11 +1016,72 @@ export default function StudyPage() {
 
                     {/* Notas de uso */}
                     {currentCard.word.usage_notes && (
-                      <div className="bg-amber-500/20 rounded-lg p-3 border border-amber-300/30">
-                        <p className="text-xs uppercase tracking-wide opacity-90 mb-1 flex items-center gap-1">
+                      <div className="bg-amber-500/20 rounded-lg p-2 border border-amber-300/30">
+                        <p className="text-xs uppercase tracking-wide opacity-90 mb-0.5 flex items-center gap-1">
                           <Zap className="h-3 w-3" /> Dicas de Uso
                         </p>
                         <p className="text-xs leading-relaxed">{currentCard.word.usage_notes}</p>
+                      </div>
+                    )}
+
+                    {/* Difficulty Buttons - Inside card back */}
+                    {isFlipped && (
+                      <div className="pt-3 border-t border-white/20 mt-3">
+                        <p className="text-center text-xs opacity-80 mb-3">
+                          Como foi? Você lembrou da resposta?
+                        </p>
+                        <div className="grid grid-cols-3 gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDifficulty('hard');
+                            }}
+                            disabled={isSubmitting}
+                            className={`p-3 rounded-lg bg-red-500/20 border border-red-300/30 text-white hover:bg-red-500/30 disabled:opacity-50 transition-all text-xs font-semibold ${
+                              showFeedback && lastDifficulty === 'hard' ? 'ring-2 ring-red-300' : ''
+                            }`}
+                          >
+                            <X className="h-4 w-4 mx-auto mb-1" />
+                            <span className="block">Difícil</span>
+                            <span className="block text-[10px] mt-0.5 opacity-70 font-normal">revisar hoje</span>
+                            <kbd className="block text-[10px] mt-1 px-1.5 py-0.5 bg-red-500/20 rounded opacity-60">1</kbd>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDifficulty('medium');
+                            }}
+                            disabled={isSubmitting}
+                            className={`p-3 rounded-lg bg-yellow-500/20 border border-yellow-300/30 text-white hover:bg-yellow-500/30 disabled:opacity-50 transition-all text-xs font-semibold ${
+                              showFeedback && lastDifficulty === 'medium' ? 'ring-2 ring-yellow-300' : ''
+                            }`}
+                          >
+                            <AlertTriangle className="h-4 w-4 mx-auto mb-1" />
+                            <span className="block">Médio</span>
+                            <span className="block text-[10px] mt-0.5 opacity-70 font-normal">revisar amanhã</span>
+                            <kbd className="block text-[10px] mt-1 px-1.5 py-0.5 bg-yellow-500/20 rounded opacity-60">2</kbd>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDifficulty('easy');
+                            }}
+                            disabled={isSubmitting}
+                            className={`p-3 rounded-lg bg-green-500/20 border border-green-300/30 text-white hover:bg-green-500/30 disabled:opacity-50 transition-all text-xs font-semibold ${
+                              showFeedback && lastDifficulty === 'easy' ? 'ring-2 ring-green-300' : ''
+                            }`}
+                          >
+                            <Check className="h-4 w-4 mx-auto mb-1" />
+                            <span className="block">Fácil</span>
+                            <span className="block text-[10px] mt-0.5 opacity-70 font-normal">revisar em 3 dias</span>
+                            <kbd className="block text-[10px] mt-1 px-1.5 py-0.5 bg-green-500/20 rounded opacity-60">3</kbd>
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1002,75 +1119,22 @@ export default function StudyPage() {
           </motion.div>
         )}
 
-        {/* Difficulty Buttons - Show only when flipped */}
-        {isFlipped && (
+        {/* Sentence Practice Button - Show only when not showing practice and card is flipped */}
+        {isFlipped && !showSentencePractice && (
           <motion.div
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            className="mt-8 w-full max-w-lg"
+            className="mt-6 w-full max-w-lg flex justify-center"
           >
-            <p className="text-center text-gray-600 mb-4">
-              Como foi? Você lembrou da resposta?
-            </p>
-
-            {/* Sentence Practice Button */}
-            {!showSentencePractice && (
-              <div className="mb-4 flex justify-center">
-                <button
-                  type="button"
-                  onClick={handleSentencePractice}
-                  className="px-4 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition text-sm font-medium flex items-center gap-2"
-                >
-                  <Award className="h-4 w-4" />
-                  Ver exemplo em frase
-                  <kbd className="px-1.5 py-0.5 bg-indigo-200 text-indigo-800 rounded text-xs">S</kbd>
-                </button>
-              </div>
-            )}
-
-            <div className="grid grid-cols-3 gap-4">
-              <button
-                type="button"
-                onClick={() => handleDifficulty('hard')}
-                disabled={isSubmitting}
-                className={`btn-difficulty bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50 transition-all ${
-                  showFeedback && lastDifficulty === 'hard' ? 'ring-4 ring-red-300 scale-105' : ''
-                }`}
-              >
-                <X className="h-5 w-5 mx-auto mb-1" />
-                Difícil
-                <span className="block text-xs opacity-70">revisar hoje</span>
-                <kbd className="block text-xs mt-1 opacity-50">1</kbd>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleDifficulty('medium')}
-                disabled={isSubmitting}
-                className={`btn-difficulty bg-yellow-100 text-yellow-700 hover:bg-yellow-200 disabled:opacity-50 transition-all ${
-                  showFeedback && lastDifficulty === 'medium' ? 'ring-4 ring-yellow-300 scale-105' : ''
-                }`}
-              >
-                <AlertTriangle className="h-5 w-5 mx-auto mb-1" />
-                Médio
-                <span className="block text-xs opacity-70">revisar amanhã</span>
-                <kbd className="block text-xs mt-1 opacity-50">2</kbd>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleDifficulty('easy')}
-                disabled={isSubmitting}
-                className={`btn-difficulty bg-green-100 text-green-700 hover:bg-green-200 disabled:opacity-50 transition-all ${
-                  showFeedback && lastDifficulty === 'easy' ? 'ring-4 ring-green-300 scale-105' : ''
-                }`}
-              >
-                <Check className="h-5 w-5 mx-auto mb-1" />
-                Fácil
-                <span className="block text-xs opacity-70">revisar em 3 dias</span>
-                <kbd className="block text-xs mt-1 opacity-50">3</kbd>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={handleSentencePractice}
+              className="px-4 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition text-sm font-medium flex items-center gap-2"
+            >
+              <Award className="h-4 w-4" />
+              Ver exemplo em frase
+              <kbd className="px-1.5 py-0.5 bg-indigo-200 text-indigo-800 rounded text-xs">S</kbd>
+            </button>
           </motion.div>
         )}
 

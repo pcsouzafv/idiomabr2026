@@ -21,11 +21,16 @@ class AITeacherService:
     def __init__(self):
         self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        self.lemonfox_api_key = os.getenv("LEMONFOX_API_KEY")
+        self.lemonfox_base_url = os.getenv("LEMONFOX_BASE_URL", "https://api.lemonfox.ai/v1")
+        self.lemonfox_enabled = os.getenv("LEMONFOX_ENABLED", "false").lower() == "true"
         self.ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         self.use_ollama_fallback = os.getenv("USE_OLLAMA_FALLBACK", "false").lower() == "true"
 
         print(f"[INIT] DeepSeek API Key: {'SET' if self.deepseek_api_key else 'NOT SET'}")
         print(f"[INIT] OpenAI API Key: {'SET' if self.openai_api_key else 'NOT SET'}")
+        print(f"[INIT] Lemonfox API Key: {'SET' if self.lemonfox_api_key else 'NOT SET'}")
+        print(f"[INIT] Lemonfox enabled: {self.lemonfox_enabled}")
         print(f"[INIT] Ollama fallback: {self.use_ollama_fallback}")
 
         # Inicializar clientes
@@ -431,9 +436,9 @@ Always respond in Portuguese unless the student practices in English."""
 
         Nota: TTS requer OpenAI API Key. Se não configurada, retorna erro explicativo.
         """
-        if not self.openai_client:
-            print("[TTS] OpenAI API Key não configurada - TTS não disponível")
-            raise Exception("TTS requer OpenAI API Key. Configure OPENAI_API_KEY no arquivo .env para usar áudio.")
+        if not self.openai_client and not (self.lemonfox_enabled and self.lemonfox_api_key):
+            print("[TTS] OpenAI/Lemonfox API Key não configurada - TTS não disponível")
+            raise Exception("TTS requer LEMONFOX_API_KEY ou OPENAI_API_KEY no arquivo .env para usar áudio.")
 
         # Cache lookup
         cache_key = None
@@ -455,22 +460,48 @@ Always respond in Portuguese unless the student practices in English."""
 
         try:
             print(f"[TTS] Gerando áudio para {len(text)} caracteres...")
-            response = self.openai_client.audio.speech.create(
-                model="tts-1",  # Modelo mais rápido e barato
-                voice=voice,
-                input=text[:4096],  # Limite de caracteres do OpenAI TTS
-                speed=0.95  # Um pouco mais devagar para aprendizes
-            )
+            safe_text = text[:4096]
+
+            if self.lemonfox_enabled and self.lemonfox_api_key:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    response = await client.post(
+                        f"{self.lemonfox_base_url}/audio/speech",
+                        headers={
+                            "Authorization": f"Bearer {self.lemonfox_api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "input": safe_text,
+                            "voice": voice,
+                            "response_format": "mp3",
+                            "language": "en-us",
+                            "speed": 0.95,
+                        },
+                    )
+                    response.raise_for_status()
+                    audio_bytes = response.content
+                    provider = "lemonfox"
+                    model = "tts"
+            else:
+                response = self.openai_client.audio.speech.create(
+                    model="tts-1",  # Modelo mais rápido e barato
+                    voice=voice,
+                    input=safe_text,  # Limite de caracteres do OpenAI TTS
+                    speed=0.95  # Um pouco mais devagar para aprendizes
+                )
+                audio_bytes = response.content
+                provider = "openai"
+                model = "tts-1"
+
             print("[TTS] Áudio gerado com sucesso!")
-            audio_bytes = response.content
             if db is not None and cache_key and cache_payload:
                 self._store_cache_entry(
                     db,
                     cache_key=cache_key,
                     scope=cache_scope,
                     operation=cache_operation,
-                    provider="openai",
-                    model="tts-1",
+                    provider=provider,
+                    model=model,
                     request_json=cache_payload,
                     response_bytes=audio_bytes,
                 )
@@ -485,10 +516,47 @@ Always respond in Portuguese unless the student practices in English."""
         audio_bytes: bytes,
         filename: str = "audio.webm",
         content_type: str = "audio/webm",
+        language: Optional[str] = None,
+        prompt: Optional[str] = None,
     ) -> str:
         """Transcreve áudio para texto (STT) usando OpenAI Whisper."""
-        if not self.openai_client:
-            raise Exception("STT requer OpenAI API Key. Configure OPENAI_API_KEY para transcrição.")
+        if not self.openai_client and not (self.lemonfox_enabled and self.lemonfox_api_key):
+            raise Exception("STT requer LEMONFOX_API_KEY ou OPENAI_API_KEY para transcrição.")
+
+        if self.lemonfox_enabled and self.lemonfox_api_key:
+            lang = (language or "").strip().lower()
+            language_map = {
+                "en": "english",
+                "en-us": "english",
+                "en_us": "english",
+                "pt": "portuguese",
+                "pt-br": "portuguese",
+                "pt_br": "portuguese",
+            }
+            lemonfox_lang = language_map.get(lang, language or None)
+
+            data = {
+                "response_format": "json",
+            }
+            if lemonfox_lang:
+                data["language"] = lemonfox_lang
+            if prompt:
+                data["prompt"] = prompt
+
+            files = {
+                "file": (filename, audio_bytes, content_type),
+            }
+
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{self.lemonfox_base_url}/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {self.lemonfox_api_key}"},
+                    data=data,
+                    files=files,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                return (payload.get("text") or "").strip()
 
         bio = io.BytesIO(audio_bytes)
         # OpenAI client uses filename from file object name when available
@@ -497,10 +565,16 @@ Always respond in Portuguese unless the student practices in English."""
         except Exception:
             pass
 
-        result = self.openai_client.audio.transcriptions.create(
-            model="whisper-1",
-            file=bio,
-        )
+        kwargs = {
+            "model": "whisper-1",
+            "file": bio,
+        }
+        if language:
+            kwargs["language"] = language
+        if prompt:
+            kwargs["prompt"] = prompt
+
+        result = self.openai_client.audio.transcriptions.create(**kwargs)
 
         # SDK may return {text: ...} or an object with .text
         text = getattr(result, "text", None)

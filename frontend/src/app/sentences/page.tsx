@@ -40,10 +40,14 @@ export default function SentencesPage() {
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   const [isRecording, setIsRecording] = useState(false);
   const [isAnalyzingPronunciation, setIsAnalyzingPronunciation] = useState(false);
@@ -147,6 +151,20 @@ export default function SentencesPage() {
     mediaStreamRef.current = null;
     mediaRecorderRef.current = null;
     chunksRef.current = [];
+    analyserRef.current = null;
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch {
+        // ignore
+      }
+      audioContextRef.current = null;
+    }
+    setAudioLevel(0);
   };
 
   const startRecording = async () => {
@@ -162,11 +180,36 @@ export default function SentencesPage() {
       mediaStreamRef.current = stream;
 
       const preferredTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
-      const mimeType = preferredTypes.find((t) => (window as any).MediaRecorder?.isTypeSupported?.(t));
+      const mimeType = preferredTypes.find(
+        (t) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)
+      );
 
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
+
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyserRef.current = analyser;
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const updateMeter = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteTimeDomainData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          const v = (dataArray[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / dataArray.length);
+        setAudioLevel(Math.min(100, Math.round(rms * 200)));
+        rafRef.current = requestAnimationFrame(updateMeter);
+      };
+      updateMeter();
 
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
@@ -179,6 +222,10 @@ export default function SentencesPage() {
         setIsAnalyzingPronunciation(true);
         try {
           const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+          if (!blob || blob.size < 800) {
+            toast.error('Áudio muito curto ou sem som. Tente novamente.');
+            return;
+          }
           const formData = new FormData();
           formData.append('audio', blob, 'pronunciation.webm');
           formData.append('expected_text', selectedSentence.english);
@@ -195,14 +242,19 @@ export default function SentencesPage() {
           toast.success('Análise de pronúncia pronta!');
         } catch (e) {
           console.error(e);
-          toast.error('Erro ao analisar pronúncia');
+          const status = getHttpStatus(e);
+          if (status === 400) {
+            toast.error('Áudio inválido/sem conteúdo. Grave novamente.');
+          } else {
+            toast.error('Erro ao analisar pronúncia');
+          }
         } finally {
           setIsAnalyzingPronunciation(false);
           cleanupMedia();
         }
       };
 
-      recorder.start();
+      recorder.start(250);
       setIsRecording(true);
       toast.success('Gravando...');
     } catch (e) {
@@ -348,6 +400,31 @@ export default function SentencesPage() {
                   <div className="mt-3 flex items-center gap-2 text-sm text-gray-600">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Analisando áudio...
+                  </div>
+                ) : null}
+
+                {isRecording ? (
+                  <div className="mt-3">
+                    <div className="text-xs text-gray-600 mb-1">Nível do microfone</div>
+                    <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full bg-emerald-500 transition-[width] duration-75 ${
+                          [
+                            'w-0',
+                            'w-1/12',
+                            'w-1/6',
+                            'w-1/4',
+                            'w-1/3',
+                            'w-5/12',
+                            'w-1/2',
+                            'w-7/12',
+                            'w-2/3',
+                            'w-5/6',
+                            'w-full',
+                          ][Math.min(10, Math.floor(audioLevel / 10))]
+                        }`}
+                      />
+                    </div>
                   </div>
                 ) : null}
 

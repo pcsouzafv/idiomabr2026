@@ -4,6 +4,7 @@ import { authApi, studyApi } from '@/lib/api';
 interface User {
   id: number;
   email: string;
+  phone_number?: string | null;
   name: string;
   daily_goal: number;
   current_streak: number;
@@ -31,7 +32,7 @@ interface AuthState {
   setUser: (user: User | null) => void;
   setToken: (token: string | null) => void;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, name: string, password: string) => Promise<void>;
+  register: (email: string, name: string, password: string, phoneNumber: string) => Promise<void>;
   logout: () => void;
   fetchUser: () => Promise<void>;
   fetchStats: () => Promise<void>;
@@ -65,8 +66,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ user: userResponse.data, isLoading: false });
   },
   
-  register: async (email: string, name: string, password: string) => {
-    await authApi.register({ email, name, password });
+  register: async (email: string, name: string, password: string, phoneNumber: string) => {
+    await authApi.register({ email, name, password, phone_number: phoneNumber });
     // Após registro, fazer login automaticamente
     const loginResponse = await authApi.login({ username: email, password });
     const { access_token } = loginResponse.data;

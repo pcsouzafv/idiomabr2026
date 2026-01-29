@@ -8,6 +8,7 @@ from typing import Optional
 import random
 import uuid
 import math
+import json
 from datetime import datetime, timezone, timedelta
 
 from app.core.database import get_db
@@ -17,6 +18,7 @@ from app.models.word import Word
 from app.models.review import Review
 from app.models.progress import UserProgress
 from app.models.gamification import UserStats, GameSession, Achievement, UserAchievement
+from app.models.sentence import Sentence
 from app.services.spaced_repetition import calculate_next_review
 from app.schemas.games import (
     QuizSessionResponse, QuizQuestion,
@@ -26,6 +28,8 @@ from app.schemas.games import (
     MatchingResultRequest, MatchingResultResponse,
     DictationSessionResponse, DictationWord,
     DictationResultRequest, DictationResultResponse,
+    SentenceBuilderItem, SentenceBuilderSessionResponse,
+    SentenceBuilderSubmitRequest, SentenceBuilderSubmitResponse,
     GameSessionResponse
 )
 
@@ -39,8 +43,66 @@ XP_REWARDS = {
     "quiz": {"base": 5, "correct": 10, "perfect_bonus": 50},
     "hangman": {"win": 30, "letter": 2},
     "matching": {"base": 20, "time_bonus_per_second": 1, "max_time_bonus": 100},
-    "dictation": {"base": 5, "correct": 15, "perfect_bonus": 75}
+    "dictation": {"base": 5, "correct": 15, "perfect_bonus": 75},
+    "sentence_builder": {"base": 10, "correct": 15, "perfect_bonus": 50}
 }
+
+
+def _normalize_sentence(text: str) -> str:
+    return " ".join((text or "").strip().lower().split())
+
+
+def _pick_sentence_from_word(word: Word) -> tuple[str, str]:
+    """Returns (sentence_en, sentence_pt)."""
+
+    sentence_en = (word.example_en or "").strip()
+    sentence_pt = (word.example_pt or word.portuguese or "").strip()
+
+    # Prefer example_sentences JSON if present
+    raw = (word.example_sentences or "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list) and parsed:
+                candidates = [x for x in parsed if isinstance(x, dict) and x.get("en")]
+                if candidates:
+                    chosen = random.choice(candidates)
+                    sentence_en = str(chosen.get("en") or sentence_en).strip()
+                    if chosen.get("pt"):
+                        sentence_pt = str(chosen.get("pt") or sentence_pt).strip()
+        except Exception:
+            pass
+
+    return sentence_en, sentence_pt
+
+
+def _tokenize_sentence_builder(text: str) -> list[str]:
+    return [t for t in (text or "").strip().split() if t.strip()]
+
+
+def _max_tokens_for_level(level: Optional[str]) -> int:
+    # Conservative limits to keep sentences proportional.
+    # A1..C2: increasingly longer sentences.
+    mapping = {
+        "A1": 6,
+        "A2": 10,
+        "B1": 14,
+        "B2": 18,
+        "C1": 24,
+        "C2": 30,
+    }
+    if not level:
+        return mapping["A1"]
+    return mapping.get(level.upper(), 12)
+
+
+def _pick_focus_word(tokens: list[str]) -> str:
+    # Prefer an alphabetic token to show as "palavra foco".
+    for t in tokens:
+        clean = "".join([c for c in t if c.isalpha()])
+        if len(clean) >= 3:
+            return clean.lower()
+    return (tokens[0].lower() if tokens else "")
 
 
 def calculate_level(xp: int) -> int:
@@ -269,6 +331,186 @@ def submit_quiz(
     )
 
 
+# ==================== MONTAR FRASES (Sentence Builder) ====================
+
+
+@router.post("/sentence-builder/start", response_model=SentenceBuilderSessionResponse)
+def start_sentence_builder(
+    num_sentences: int = 5,
+    level: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Inicia uma sessão de montar frases usando a tabela de sentenças do banco.
+
+    Respeita o nível via `Sentence.level` e limita o tamanho da frase para ficar proporcional ao nível.
+    """
+
+    chosen_level = (level or "A1").upper()
+    max_tokens = _max_tokens_for_level(chosen_level)
+
+    query = db.query(Sentence).filter(
+        Sentence.english.isnot(None),
+        Sentence.english != "",
+        Sentence.portuguese.isnot(None),
+        Sentence.portuguese != "",
+        Sentence.level == chosen_level,
+    )
+
+    # Buscar um conjunto maior e filtrar em memória por tamanho.
+    # (func.random funciona bem no Postgres; evita carregar a tabela inteira.)
+    candidate_limit = max(20, num_sentences * 12)
+    candidates = query.order_by(func.random()).limit(candidate_limit).all()
+    if len(candidates) < 1:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Não há sentenças cadastradas para o nível {chosen_level}. "
+                "Cadastre mais sentenças e tente novamente."
+            ),
+        )
+
+    items = []
+    correct_map = {}
+    for s in candidates:
+        sentence_en = (s.english or "").strip()
+        sentence_pt = (s.portuguese or "").strip()
+        tokens = _tokenize_sentence_builder(sentence_en)
+
+        # Evitar frases muito curtas ou longas demais para o nível.
+        if len(tokens) < 3 or len(tokens) > max_tokens:
+            continue
+
+        shuffled = tokens[:]
+        random.shuffle(shuffled)
+
+        item_id = str(uuid.uuid4())
+        items.append(
+            SentenceBuilderItem(
+                item_id=item_id,
+                # Reaproveita o campo existente sem quebrar o frontend
+                word_id=s.id,
+                focus_word=_pick_focus_word(tokens),
+                sentence_pt=sentence_pt,
+                tokens=shuffled,
+            )
+        )
+
+        correct_map[item_id] = {
+            "sentence_en": sentence_en,
+            "tokens": tokens,
+            "sentence_id": s.id,
+            "level": chosen_level,
+        }
+
+        if len(items) >= num_sentences:
+            break
+
+    if not items:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Não foi possível gerar frases válidas para o nível {chosen_level}. "
+                "Tente cadastrar frases mais curtas para este nível."
+            ),
+        )
+
+    session_id = str(uuid.uuid4())
+    game_sessions[session_id] = {
+        "type": "sentence_builder",
+        "user_id": current_user.id,
+        "created_at": datetime.now(timezone.utc),
+        "correct": correct_map,
+    }
+
+    return SentenceBuilderSessionResponse(session_id=session_id, items=items, total=len(items))
+
+
+@router.post("/sentence-builder/submit", response_model=SentenceBuilderSubmitResponse)
+def submit_sentence_builder(
+    request: SentenceBuilderSubmitRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Submete uma sessão de montar frases e calcula pontuação."""
+
+    session_id = request.session_id
+    if session_id not in game_sessions:
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+
+    session = game_sessions[session_id]
+    if session.get("user_id") != current_user.id:
+        raise HTTPException(status_code=403, detail="Sessão não pertence ao usuário")
+    if session.get("type") != "sentence_builder":
+        raise HTTPException(status_code=400, detail="Tipo de sessão inválido")
+
+    correct_map = session.get("correct") or {}
+
+    total = len(correct_map)
+    score = 0
+    results = []
+
+    for ans in request.answers:
+        correct = correct_map.get(ans.item_id)
+        if not correct:
+            continue
+
+        expected_tokens = correct.get("tokens") or []
+        expected_sentence = correct.get("sentence_en") or ""
+
+        user_sentence = " ".join([t for t in (ans.tokens or []) if str(t).strip()]).strip()
+        expected_norm = _normalize_sentence(expected_sentence)
+        user_norm = _normalize_sentence(user_sentence)
+
+        is_correct = user_norm == expected_norm
+        if is_correct:
+            score += 1
+
+        results.append({
+            "item_id": ans.item_id,
+            "correct": is_correct,
+            "expected": expected_sentence,
+            "your_answer": user_sentence,
+            "expected_tokens": expected_tokens,
+        })
+
+    percentage = (score / total) * 100 if total > 0 else 0
+
+    xp = XP_REWARDS["sentence_builder"]["base"] + (score * XP_REWARDS["sentence_builder"]["correct"])
+    if score == total and total >= 3:
+        xp += XP_REWARDS["sentence_builder"]["perfect_bonus"]
+
+    stats = get_or_create_stats(db, current_user.id)
+    stats.total_reviews += total  # type: ignore[misc]
+    stats.correct_answers += score  # type: ignore[misc]
+    stats.games_played += 1  # type: ignore[misc]
+    if score == total:
+        stats.games_won += 1  # type: ignore[misc]
+
+    add_xp(db, current_user.id, xp)
+
+    game_session = GameSession(
+        user_id=current_user.id,
+        game_type="sentence_builder",
+        score=score,
+        max_score=total,
+        time_spent=request.time_spent,
+        xp_earned=xp
+    )
+    db.add(game_session)
+    db.commit()
+
+    del game_sessions[session_id]
+
+    return SentenceBuilderSubmitResponse(
+        score=score,
+        total=total,
+        percentage=percentage,
+        xp_earned=xp,
+        results=results,
+    )
+
+
 # ==================== HANGMAN ====================
 
 @router.post("/hangman/start", response_model=HangmanState)
@@ -278,6 +520,8 @@ def start_hangman(
     current_user: User = Depends(get_current_user)
 ):
     """Inicia um novo jogo da forca."""
+    import re
+
     query = db.query(Word)
     
     if level:
@@ -293,10 +537,42 @@ def start_hangman(
     
     if not valid_words:
         raise HTTPException(status_code=400, detail="Não há palavras disponíveis")
-    
-    word = random.choice(valid_words)
+
+    # Preferir palavras com mais contexto (para dicas melhores)
+    def _has_context(w: Word) -> bool:
+        return any([
+            (w.word_type or "").strip(),
+            (w.definition_pt or "").strip(),
+            (w.definition_en or "").strip(),
+            (w.example_en or "").strip(),
+            (w.example_pt or "").strip(),
+            (w.usage_notes or "").strip(),
+            (w.tags or "").strip(),
+            (w.ipa or "").strip(),
+        ])
+
+    enriched_words = [w for w in valid_words if _has_context(w)]
+    word = random.choice(enriched_words) if enriched_words else random.choice(valid_words)
     english_clean = word.english.strip()
     session_id = str(uuid.uuid4())
+
+    def _parse_tags(raw: Optional[str]) -> list[str]:
+        if not raw:
+            return []
+        parts = [p.strip() for p in raw.split(",")]
+        return [p for p in parts if p]
+
+    def _mask_word_in_text(text: Optional[str], answer: str) -> Optional[str]:
+        if not text:
+            return None
+        text_clean = " ".join(text.strip().split())
+        if not text_clean:
+            return None
+        # Mascara a palavra exata no exemplo para não dar spoiler.
+        # Ex.: "I like apples" -> "I like _____"
+        pattern = re.compile(r"\\b" + re.escape(answer) + r"\\b", re.IGNORECASE)
+        masked = pattern.sub("_" * len(answer), text_clean)
+        return masked
     
     game_sessions[session_id] = {
         "type": "hangman",
@@ -320,7 +596,17 @@ def start_hangman(
         attempts_left=6,
         max_attempts=6,
         hint=word.portuguese.strip(),
-        ipa=word.ipa or ""
+        ipa=word.ipa or "",
+
+        level=word.level,
+        word_type=(word.word_type or None),
+        tags=_parse_tags(word.tags),
+        definition_pt=(word.definition_pt or None),
+        definition_en=(word.definition_en or None),
+        example_en=_mask_word_in_text(word.example_en, english_clean.lower()),
+        example_pt=_mask_word_in_text(word.example_pt, english_clean.lower()),
+        usage_notes=(word.usage_notes or None),
+        length=len(english_clean)
     )
 
 

@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/authStore';
+import { authApi } from '@/lib/api';
 import ThemeToggle from '@/components/ThemeToggle';
 import {
   BookOpen,
@@ -17,17 +18,19 @@ import {
   Award,
   Gamepad2,
   Trophy,
-  Zap,
   Star,
-  MessageSquare,
   Brain,
   Shield,
+  GraduationCap,
+  MessageCircle,
 } from 'lucide-react';
 
 export default function DashboardPage() {
   const { user, stats, isLoading, fetchUser, fetchStats, logout } = useAuthStore();
   const router = useRouter();
   const progressBarRef = useRef<HTMLDivElement | null>(null);
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [isSavingPhone, setIsSavingPhone] = useState(false);
 
   useEffect(() => {
     fetchUser();
@@ -44,6 +47,10 @@ export default function DashboardPage() {
       fetchStats();
     }
   }, [user, fetchStats]);
+
+  useEffect(() => {
+    setPhoneNumber(user?.phone_number || '');
+  }, [user?.phone_number]);
 
   const handleLogout = () => {
     logout();
@@ -65,6 +72,24 @@ export default function DashboardPage() {
       </div>
     );
   }
+
+  const handleSavePhone = async () => {
+    if (!phoneNumber.trim()) {
+      alert('Informe um telefone válido.');
+      return;
+    }
+    try {
+      setIsSavingPhone(true);
+      await authApi.updateMe({ phone_number: phoneNumber.trim() });
+      await fetchUser();
+      alert('Telefone atualizado com sucesso!');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      alert(err.response?.data?.detail || 'Erro ao atualizar telefone');
+    } finally {
+      setIsSavingPhone(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors">
@@ -201,6 +226,39 @@ export default function DashboardPage() {
           )}
         </div>
 
+        {/* Phone Number */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm mb-8 transition-colors">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Telefone para envio de lições</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Precisamos do seu número para enviar lições via WhatsApp/Telegram/Discord.
+              </p>
+            </div>
+            {!user.phone_number && (
+              <span className="text-xs font-semibold text-amber-700 bg-amber-100 px-3 py-1 rounded-full">
+                Pendente
+              </span>
+            )}
+          </div>
+          <div className="mt-4 flex flex-col md:flex-row gap-3">
+            <input
+              type="tel"
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value)}
+              placeholder="+55 11 99999-9999"
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-900 dark:border-gray-700 dark:text-white"
+            />
+            <button
+              onClick={handleSavePhone}
+              disabled={isSavingPhone}
+              className="px-6 py-2 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition disabled:opacity-50"
+            >
+              {isSavingPhone ? 'Salvando...' : 'Salvar'}
+            </button>
+          </div>
+        </div>
+
         {/* Action Buttons */}
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           <Link
@@ -234,6 +292,23 @@ export default function DashboardPage() {
                 <h3 className="text-xl font-bold">Estudar Frases com IA</h3>
                 <p className="text-blue-100">
                   Professor de IA personalizado
+                </p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/conversation"
+            className="bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-xl p-6 shadow-lg hover:shadow-xl transition transform hover:scale-[1.02]"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 bg-white/20 rounded-xl flex items-center justify-center">
+                <MessageCircle className="h-8 w-8" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold">Conversação com IA 🎙️</h3>
+                <p className="text-violet-100">
+                  Pratique inglês falando com IA
                 </p>
               </div>
             </div>
@@ -352,6 +427,21 @@ export default function DashboardPage() {
               <div>
                 <h3 className="text-xl font-bold">Leitura & Escrita</h3>
                 <p className="text-gray-500 dark:text-gray-400">Pratique textos e receba correções</p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/exams"
+            className="bg-gradient-to-r from-slate-800 to-slate-950 text-white rounded-xl p-6 shadow-lg hover:shadow-xl transition transform hover:scale-[1.02]"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 bg-white/10 rounded-xl flex items-center justify-center">
+                <GraduationCap className="h-8 w-8" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold">Preparação para Exames</h3>
+                <p className="text-slate-200">IELTS, TOEFL, TOEIC e Cambridge</p>
               </div>
             </div>
           </Link>

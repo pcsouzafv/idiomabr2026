@@ -141,6 +141,17 @@ class HangmanState(BaseModel):
     hint: str  # Tradução em português
     ipa: str
 
+    # Contexto extra para dicas melhores (opcionais)
+    level: Optional[str] = None
+    word_type: Optional[str] = None
+    tags: List[str] = []
+    definition_pt: Optional[str] = None
+    definition_en: Optional[str] = None
+    example_en: Optional[str] = None
+    example_pt: Optional[str] = None
+    usage_notes: Optional[str] = None
+    length: int = 0
+
 
 class HangmanGuessRequest(BaseModel):
     letter: str
@@ -227,6 +238,41 @@ class DictationResultRequest(BaseModel):
 
 
 class DictationResultResponse(BaseModel):
+    score: int
+    total: int
+    percentage: float
+    xp_earned: int
+    results: List[dict]
+
+
+# ============== Montar Frases (Sentence Builder) ==============
+
+class SentenceBuilderItem(BaseModel):
+    item_id: str
+    word_id: int
+    focus_word: str
+    sentence_pt: str
+    tokens: List[str]
+
+
+class SentenceBuilderSessionResponse(BaseModel):
+    session_id: str
+    items: List[SentenceBuilderItem]
+    total: int
+
+
+class SentenceBuilderAnswer(BaseModel):
+    item_id: str
+    tokens: List[str]
+
+
+class SentenceBuilderSubmitRequest(BaseModel):
+    session_id: str
+    answers: List[SentenceBuilderAnswer]
+    time_spent: int = 0
+
+
+class SentenceBuilderSubmitResponse(BaseModel):
     score: int
     total: int
     percentage: float

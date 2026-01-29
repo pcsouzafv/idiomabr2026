@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { statsApi } from '@/lib/api';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { Trophy, Star, Lock, ChevronLeft } from 'lucide-react';
 
 interface Achievement {
@@ -37,6 +36,24 @@ export default function AchievementsPage() {
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('all');
+
+  const typeBgClass: Record<string, string> = {
+    words: 'bg-blue-500',
+    streak: 'bg-orange-500',
+    games: 'bg-purple-500',
+    perfect: 'bg-yellow-500',
+    speed: 'bg-green-500',
+    level: 'bg-pink-500',
+  };
+
+  const typeAccentClass: Record<string, string> = {
+    words: 'accent-blue-500',
+    streak: 'accent-orange-500',
+    games: 'accent-purple-500',
+    perfect: 'accent-yellow-500',
+    speed: 'accent-green-500',
+    level: 'accent-pink-500',
+  };
 
   useEffect(() => {
     loadData();
@@ -121,18 +138,6 @@ export default function AchievementsPage() {
     return labels[type] || type;
   };
 
-  const getTypeColor = (type: string): string => {
-    const colors: { [key: string]: string } = {
-      words: 'blue',
-      streak: 'orange',
-      games: 'purple',
-      perfect: 'yellow',
-      speed: 'green',
-      level: 'pink',
-    };
-    return colors[type] || 'gray';
-  };
-
   const filteredAchievements =
     filter === 'all'
       ? allAchievements
@@ -199,9 +204,11 @@ export default function AchievementsPage() {
             <Trophy className="w-16 h-16 opacity-75" />
           </div>
           <div className="w-full bg-white/30 rounded-full h-4">
-            <div
-              className="bg-white h-4 rounded-full transition-all duration-500"
-              style={{ width: `${completionPercentage}%` }}
+            <progress
+              className="w-full h-4 rounded-full overflow-hidden bg-white/30"
+              value={unlockedCount}
+              max={Math.max(totalCount, 1)}
+              aria-label="Progresso de conquistas"
             />
           </div>
         </div>
@@ -244,29 +251,12 @@ export default function AchievementsPage() {
 
         {/* Achievements by Type */}
         {Object.entries(groupedAchievements).map(([type, achievements]) => {
-          const color = getTypeColor(type);
+          const dotBg = typeBgClass[type] ?? 'bg-gray-500';
+          const progressAccent = typeAccentClass[type] ?? 'accent-gray-500';
           return (
             <div key={type} className="mb-8">
               <h2 className="text-2xl font-bold text-gray-900 mb-4 flex items-center">
-                <span
-                  className={`w-3 h-3 rounded-full bg-${color}-500 mr-3`}
-                  style={{
-                    backgroundColor:
-                      color === 'blue'
-                        ? '#3B82F6'
-                        : color === 'orange'
-                        ? '#F97316'
-                        : color === 'purple'
-                        ? '#A855F7'
-                        : color === 'yellow'
-                        ? '#EAB308'
-                        : color === 'green'
-                        ? '#10B981'
-                        : color === 'pink'
-                        ? '#EC4899'
-                        : '#6B7280',
-                  }}
-                />
+                <span className={`w-3 h-3 rounded-full mr-3 ${dotBg}`} />
                 {getTypeLabel(type)}
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -309,28 +299,13 @@ export default function AchievementsPage() {
                               {currentValue} / {achievement.requirement}
                             </span>
                           </div>
-                          <div className="w-full bg-gray-200 rounded-full h-2">
-                            <div
-                              className={`bg-${color}-500 h-2 rounded-full transition-all duration-500`}
-                              style={{
-                                width: `${progress}%`,
-                                backgroundColor:
-                                  color === 'blue'
-                                    ? '#3B82F6'
-                                    : color === 'orange'
-                                    ? '#F97316'
-                                    : color === 'purple'
-                                    ? '#A855F7'
-                                    : color === 'yellow'
-                                    ? '#EAB308'
-                                    : color === 'green'
-                                    ? '#10B981'
-                                    : color === 'pink'
-                                    ? '#EC4899'
-                                    : '#6B7280',
-                              }}
-                            />
-                          </div>
+                          <progress
+                            className={`w-full h-2 ${progressAccent}`}
+                            value={Math.max(0, Math.min(achievement.requirement, currentValue))}
+                            max={Math.max(achievement.requirement, 1)}
+                            aria-label={`Progresso: ${achievement.name}`}
+                          />
+                          <div className="sr-only">{Math.round(progress)}%</div>
                         </div>
                       )}
 

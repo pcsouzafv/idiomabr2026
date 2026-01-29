@@ -85,14 +85,30 @@ def get_word(
         ipa=word.ipa,
         portuguese=word.portuguese,
         level=word.level,
+
+        # Informações gramaticais e semânticas
+        word_type=word.word_type,
+        definition_en=word.definition_en,
+        definition_pt=word.definition_pt,
+        synonyms=word.synonyms,
+        antonyms=word.antonyms,
+
+        # Exemplos e uso
         example_en=word.example_en,
         example_pt=word.example_pt,
+        example_sentences=word.example_sentences,
+        usage_notes=word.usage_notes,
+        collocations=word.collocations,
+
+        # Categorização
         tags=word.tags,
         audio_url=word.audio_url,
+
+        # Progresso
         is_learned=progress is not None and progress.repetitions >= 3,
         next_review=progress.next_review.isoformat() if progress and progress.next_review else None,
         total_reviews=progress.total_reviews if progress else 0,
-        correct_count=progress.correct_count if progress else 0
+        correct_count=progress.correct_count if progress else 0,
     )
     
     return word_data

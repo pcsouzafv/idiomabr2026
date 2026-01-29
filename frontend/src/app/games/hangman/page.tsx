@@ -26,6 +26,16 @@ interface HangmanSessionResponse {
   max_attempts: number;
   hint: string;
   ipa: string;
+
+  level?: string;
+  word_type?: string | null;
+  tags?: string[];
+  definition_pt?: string | null;
+  definition_en?: string | null;
+  example_en?: string | null;
+  example_pt?: string | null;
+  usage_notes?: string | null;
+  length?: number;
 }
 
 interface HangmanGuessResponse {
@@ -47,6 +57,17 @@ interface HangmanGameState {
   maxAttempts: number;
   hint: string;
   ipa: string;
+
+  level?: string;
+  wordType?: string | null;
+  tags?: string[];
+  definitionPt?: string | null;
+  definitionEn?: string | null;
+  exampleEn?: string | null;
+  examplePt?: string | null;
+  usageNotes?: string | null;
+  length?: number;
+
   gameOver: boolean;
   won: boolean;
   word?: string;
@@ -76,6 +97,15 @@ export default function HangmanPage() {
         maxAttempts: data.max_attempts,
         hint: data.hint,
         ipa: data.ipa,
+        level: data.level,
+        wordType: data.word_type ?? null,
+        tags: data.tags ?? [],
+        definitionPt: data.definition_pt ?? null,
+        definitionEn: data.definition_en ?? null,
+        exampleEn: data.example_en ?? null,
+        examplePt: data.example_pt ?? null,
+        usageNotes: data.usage_notes ?? null,
+        length: data.length,
         gameOver: false,
         won: false,
         word: undefined,
@@ -179,6 +209,40 @@ export default function HangmanPage() {
 
   const isGameOver = game.gameOver;
 
+  const answerWord = (game.word || game.display.replace(/\s/g, '')).toLowerCase();
+  const firstLetter = answerWord && answerWord !== '_' ? answerWord[0]?.toUpperCase() : '';
+  const lastLetter = answerWord && answerWord !== '_' ? answerWord[answerWord.length - 1]?.toUpperCase() : '';
+  const length = game.length ?? answerWord.replace(/_/g, '').length;
+
+  const extraHints: Array<{ title: string; value: string }> = [];
+  // Dicas progressivas: quanto menos tentativas, mais contexto.
+  // 6 = só o básico; 5..1 vai liberando.
+  if (game.attemptsLeft <= 5 && firstLetter) {
+    extraHints.push({ title: 'Primeira letra', value: firstLetter });
+  }
+  if (game.attemptsLeft <= 4 && lastLetter) {
+    extraHints.push({ title: 'Última letra', value: lastLetter });
+  }
+  if (game.attemptsLeft <= 3) {
+    const def = game.definitionPt || game.definitionEn;
+    if (def) extraHints.push({ title: 'Definição', value: def });
+  }
+  if (game.attemptsLeft <= 2) {
+    const ex = game.exampleEn || game.examplePt;
+    if (ex) extraHints.push({ title: 'Exemplo', value: ex });
+  }
+  if (game.attemptsLeft <= 1 && game.usageNotes) {
+    extraHints.push({ title: 'Uso / contexto', value: game.usageNotes });
+  }
+
+  const moodLine = (() => {
+    if (game.won) return 'Mandou bem! Quer aumentar a sequência?';
+    if (game.gameOver && !game.won) return 'Sem estresse — essa era pegadinha. Bora outra?';
+    if (game.attemptsLeft >= 5) return 'Começou bem. Vai no feeling!';
+    if (game.attemptsLeft >= 3) return 'A corda está apertando… mas dá pra virar!';
+    return 'Agora é modo sobrevivência. Use as dicas!';
+  })();
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
       {/* Header */}
@@ -272,10 +336,57 @@ export default function HangmanPage() {
         </div>
 
         {/* Dica */}
-        <div className="text-center mb-8">
-          <p className="text-gray-400">
-            <span className="text-gray-500">Dica:</span> {game.hint}
-          </p>
+        <div className="mb-8">
+          <div className="text-center mb-3">
+            <p className="text-gray-400">
+              <span className="text-gray-500">Dica principal:</span> {game.hint}
+            </p>
+            <p className="text-gray-500 text-sm mt-1">{moodLine}</p>
+          </div>
+
+          <div className="bg-gray-800/40 border border-gray-700 rounded-2xl p-4">
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <span className="text-xs px-2 py-1 rounded-full bg-gray-700/60 text-gray-200">
+                {length} letras
+              </span>
+              {game.level && (
+                <span className="text-xs px-2 py-1 rounded-full bg-gray-700/60 text-gray-200">
+                  Nível {game.level}
+                </span>
+              )}
+              {game.wordType && (
+                <span className="text-xs px-2 py-1 rounded-full bg-gray-700/60 text-gray-200">
+                  {game.wordType}
+                </span>
+              )}
+              {(game.tags || []).slice(0, 3).map((t) => (
+                <span key={t} className="text-xs px-2 py-1 rounded-full bg-gray-700/60 text-gray-400">
+                  #{t}
+                </span>
+              ))}
+            </div>
+
+            {extraHints.length > 0 && (
+              <div className="mt-4">
+                <p className="text-center text-sm text-gray-400 mb-2">
+                  Dicas desbloqueadas ({extraHints.length})
+                </p>
+                <div className="space-y-2">
+                  {extraHints.map((h) => (
+                    <motion.div
+                      key={h.title}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-gray-900/30 border border-gray-700 rounded-xl p-3"
+                    >
+                      <div className="text-xs text-gray-500 mb-1">{h.title}</div>
+                      <div className="text-gray-200 text-sm whitespace-pre-wrap">{h.value}</div>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Teclado */}

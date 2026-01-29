@@ -32,7 +32,7 @@ services:
     networks:
       - idiomasbr-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD", "ollama", "list"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -52,8 +52,23 @@ services:
       ACCESS_TOKEN_EXPIRE_MINUTES: 10080
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LEMONFOX_API_KEY: ${LEMONFOX_API_KEY:-}
+      LEMONFOX_BASE_URL: ${LEMONFOX_BASE_URL:-https://api.lemonfox.ai/v1}
+      LEMONFOX_ENABLED: ${LEMONFOX_ENABLED:-false}
+      CONVERSATION_AI_PROVIDER: ${CONVERSATION_AI_PROVIDER:-auto}
+      CONVERSATION_OPENAI_MODEL: ${CONVERSATION_OPENAI_MODEL:-gpt-4o-mini}
+      CONVERSATION_DEEPSEEK_MODEL: ${CONVERSATION_DEEPSEEK_MODEL:-deepseek-chat}
+      CONVERSATION_HISTORY_MESSAGES: ${CONVERSATION_HISTORY_MESSAGES:-10}
+      CONVERSATION_MAX_TOKENS: ${CONVERSATION_MAX_TOKENS:-700}
+      CONVERSATION_TEMPERATURE: ${CONVERSATION_TEMPERATURE:-0.7}
+      CONVERSATION_TIMEOUT_SECONDS: ${CONVERSATION_TIMEOUT_SECONDS:-30}
+      CONVERSATION_MAX_RETRIES: ${CONVERSATION_MAX_RETRIES:-1}
+      OPENAI_TTS_BASE_URL: ${OPENAI_TTS_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_TTS_MODEL: ${OPENAI_TTS_MODEL:-tts-1}
       OLLAMA_URL: http://ollama:11434
       USE_OLLAMA_FALLBACK: ${USE_OLLAMA_FALLBACK:-false}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID:-21m00Tcm4TlvDq8ikWAM}
       PORT: 8000
     ports:
       - "8000:8000"
@@ -81,6 +96,25 @@ services:
       - "3000:3000"
     depends_on:
       - backend
+    networks:
+      - idiomasbr-network
+
+  # RealtimeSTT (WebSocket STT)
+  realtimestt:
+    build:
+      context: ./stt
+      dockerfile: Dockerfile
+    container_name: idiomasbr-realtimestt
+    restart: unless-stopped
+    environment:
+      STT_MODEL: ${STT_MODEL:-small.en}
+      STT_REALTIME_MODEL: ${STT_REALTIME_MODEL:-tiny.en}
+      STT_LANGUAGE: ${STT_LANGUAGE:-en}
+      STT_SILERO_SENSITIVITY: ${STT_SILERO_SENSITIVITY:-0.4}
+      STT_WEBRTC_SENSITIVITY: ${STT_WEBRTC_SENSITIVITY:-3}
+      STT_POST_SPEECH_SILENCE: ${STT_POST_SPEECH_SILENCE:-0.7}
+    ports:
+      - "8001:8001"
     networks:
       - idiomasbr-network
 

@@ -132,9 +132,16 @@ async def create_user_admin(
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email já registrado")
+    phone_number = user_data.phone_number.strip()
+    if not phone_number:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telefone é obrigatório")
+    existing_phone = db.query(User).filter(User.phone_number == phone_number).first()
+    if existing_phone:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telefone já registrado")
 
     new_user = User(
         email=user_data.email,
+        phone_number=phone_number,
         name=user_data.name,
         hashed_password=get_password_hash(user_data.password),
         is_active=bool(user_data.is_active),
@@ -175,6 +182,16 @@ async def update_user(
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
     update_data = user_data.dict(exclude_unset=True)
+    if "phone_number" in update_data:
+        phone_value = (update_data.get("phone_number") or "").strip()
+        if phone_value:
+            existing_phone = db.query(User).filter(User.phone_number == phone_value, User.id != user_id).first()
+            if existing_phone:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telefone já registrado")
+            update_data["phone_number"] = phone_value
+        else:
+            update_data["phone_number"] = None
+
     for field, value in update_data.items():
         setattr(user, field, value)
 

@@ -27,10 +27,23 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email já registrado"
         )
+    phone_number = user_data.phone_number.strip()
+    if not phone_number:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Telefone é obrigatório"
+        )
+    existing_phone = db.query(User).filter(User.phone_number == phone_number).first()
+    if existing_phone:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Telefone já registrado"
+        )
     
     # Criar usuário
     user = User(
         email=user_data.email,
+        phone_number=phone_number,
         name=user_data.name,
         hashed_password=get_password_hash(user_data.password)
     )
@@ -79,6 +92,18 @@ def update_me(
         current_user.name = user_data.name  # type: ignore[assignment]
     if user_data.daily_goal:
         current_user.daily_goal = user_data.daily_goal  # type: ignore[assignment]
+    if user_data.phone_number:
+        phone_number = user_data.phone_number.strip()
+        if not phone_number:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telefone inválido")
+        existing_phone = (
+            db.query(User)
+            .filter(User.phone_number == phone_number, User.id != current_user.id)
+            .first()
+        )
+        if existing_phone:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telefone já registrado")
+        current_user.phone_number = phone_number  # type: ignore[assignment]
 
     db.commit()
     db.refresh(current_user)

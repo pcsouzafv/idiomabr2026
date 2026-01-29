@@ -36,7 +36,7 @@ api.interceptors.response.use(
 
 // Auth
 export const authApi = {
-  register: (data: { email: string; name: string; password: string }) =>
+  register: (data: { email: string; name: string; password: string; phone_number: string }) =>
     api.post('/api/auth/register', data),
   
   login: (data: { username: string; password: string }) => {
@@ -50,7 +50,7 @@ export const authApi = {
   
   getMe: () => api.get('/api/auth/me'),
   
-  updateMe: (data: { name?: string; daily_goal?: number }) =>
+  updateMe: (data: { name?: string; daily_goal?: number; phone_number?: string }) =>
     api.put('/api/auth/me', data),
 };
 
@@ -102,6 +102,11 @@ export const gamesApi = {
     api.post('/api/games/dictation/start', null, { params }),
   submitDictation: (data: { session_id: string; answers: { word_id: number; answer: string }[]; time_spent?: number }) =>
     api.post('/api/games/dictation/submit', data),
+
+  startSentenceBuilder: (params?: { num_sentences?: number; level?: string }) =>
+    api.post('/api/games/sentence-builder/start', null, { params }),
+  submitSentenceBuilder: (data: { session_id: string; answers: { item_id: string; tokens: string[] }[]; time_spent?: number }) =>
+    api.post('/api/games/sentence-builder/submit', data),
 };
 
 export const statsApi = {
@@ -111,6 +116,24 @@ export const statsApi = {
   getLeaderboard: (params?: { limit?: number }) =>
     api.get('/api/stats/leaderboard', { params }),
   getDailyChallenge: () => api.get('/api/stats/daily-challenge'),
+};
+
+// Exams AI (mini-simulados + análise)
+export const examsAiApi = {
+  generate: (data: {
+    exam: string;
+    skill?: string;
+    num_questions?: number;
+    level?: string;
+  }) => api.post('/api/exams/ai/generate', data),
+
+  analyze: (data: {
+    exam: string;
+    skill?: string;
+    level?: string;
+    questions: Array<{ id: string; type: string; prompt: string; options?: string[] | null }>;
+    answers: Array<{ id: string; answer: string }>;
+  }) => api.post('/api/exams/ai/analyze', data),
 };
 
 // Videos
@@ -166,6 +189,67 @@ export const videosApi = {
   getCategories: () => api.get('/api/videos/categories/list'),
 
   getLevels: () => api.get('/api/videos/levels/list'),
+};
+
+// Conversation (DeepSeek chat + OpenAI TTS)
+export const conversationApi = {
+  // Text-to-Speech
+  textToSpeech: (data: {
+    text: string;
+    voice_id?: string;
+    model_id?: string;
+    voice_settings?: any;
+  }) => api.post('/api/conversation/tts', data, { responseType: 'blob' }),
+
+  getVoices: () => api.get('/api/conversation/voices'),
+
+  // Conversational AI
+  startConversation: (data?: {
+    system_prompt?: string;
+    agent_id?: string;
+    initial_message?: string;
+  }) => api.post('/api/conversation/start', data || {}),
+
+  startLesson: (data: {
+    questions: string[];
+    native_language?: string;
+    target_language?: string;
+    topic?: string;
+    num_questions?: number;
+  }) => api.post('/api/conversation/lesson/start', data),
+
+  generateLesson: (data: { topic: string; num_questions?: number }) =>
+    api.post('/api/conversation/lesson/generate', data),
+
+  sendMessage: (conversationId: string, data: { message: string }) =>
+    api.post(`/api/conversation/${conversationId}/message`, data),
+
+  sendLessonMessage: (conversationId: string, data: { message: string }) =>
+    api.post(`/api/conversation/lesson/${conversationId}/message`, data),
+
+  analyzePronunciation: (data: FormData) =>
+    api.post('/api/conversation/pronunciation', data, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+
+  transcribeAudio: (data: FormData) =>
+    api.post('/api/conversation/stt', data, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+
+  getHistory: (conversationId: string) =>
+    api.get(`/api/conversation/${conversationId}/history`),
+
+  endConversation: (conversationId: string, data?: { feedback?: string }) =>
+    api.post(`/api/conversation/${conversationId}/end`, data || {}),
+
+  listActiveConversations: () => api.get('/api/conversation/active/list'),
+
+  listLessonAttempts: (params?: { limit?: number }) =>
+    api.get('/api/conversation/lesson/attempts', { params }),
+
+  getLessonAttemptDetails: (attemptId: number) =>
+    api.get(`/api/conversation/lesson/attempts/${attemptId}`),
 };
 
 export default api;

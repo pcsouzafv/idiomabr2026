@@ -6,6 +6,7 @@ from datetime import datetime
 # User Schemas
 class UserCreate(BaseModel):
     email: EmailStr
+    phone_number: str
     name: str
     password: str
 
@@ -18,6 +19,7 @@ class UserLogin(BaseModel):
 class UserResponse(BaseModel):
     id: int
     email: str
+    phone_number: Optional[str] = None
     name: str
     is_active: bool
     is_admin: bool = False
@@ -33,6 +35,7 @@ class UserResponse(BaseModel):
 class UserUpdate(BaseModel):
     name: Optional[str] = None
     daily_goal: Optional[int] = None
+    phone_number: Optional[str] = None
 
 
 # Token Schemas

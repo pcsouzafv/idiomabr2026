@@ -574,10 +574,10 @@ async def text_to_speech(
     except Exception as e:
         error_msg = str(e)
         # Se o erro for de TTS não disponível, retornar 503 (Service Unavailable)
-        if "TTS requer OpenAI API Key" in error_msg or "OpenAI API Key" in error_msg:
+        if "TTS requer" in error_msg or "OpenAI API Key" in error_msg or "LEMONFOX_API_KEY" in error_msg:
             raise HTTPException(
                 status_code=503,
-                detail="Text-to-Speech não disponível. Configure OPENAI_API_KEY para usar áudio."
+                detail="Text-to-Speech não disponível. Configure LEMONFOX_API_KEY ou OPENAI_API_KEY para usar áudio."
             )
         # Outros erros
         raise HTTPException(
@@ -617,6 +617,8 @@ async def analyze_pronunciation(
             audio_bytes=audio_bytes,
             filename=audio.filename or "audio.webm",
             content_type=audio.content_type or "audio/webm",
+            language="en",
+            prompt=expected,
         )
 
         def _norm(s: str) -> str:

@@ -4,12 +4,13 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/authStore';
-import { BookOpen, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
+import { BookOpen, Mail, Lock, User, Eye, EyeOff, Phone } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function RegisterPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -30,11 +31,16 @@ export default function RegisterPage() {
       toast.error('A senha deve ter pelo menos 6 caracteres');
       return;
     }
+
+    if (!phoneNumber.trim()) {
+      toast.error('Informe um telefone válido');
+      return;
+    }
     
     setIsLoading(true);
 
     try {
-      await register(email, name, password);
+      await register(email, name, password, phoneNumber);
       toast.success('Conta criada com sucesso!');
       router.push('/dashboard');
     } catch (error: unknown) {
@@ -96,6 +102,24 @@ export default function RegisterPage() {
                   required
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Telefone (WhatsApp)
+              </label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                <input
+                  type="tel"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition"
+                  placeholder="+55 11 99999-9999"
+                  required
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Usaremos para enviar lições no futuro.</p>
             </div>
 
             <div>
