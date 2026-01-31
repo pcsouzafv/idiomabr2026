@@ -1,0 +1,32 @@
+=== CONTAGEM ===
+ total | empty_example_en | empty_example_pt | empty_definition_en | empty_definition_pt | bad_level 
+-------+------------------+------------------+---------------------+---------------------+-----------
+ 10074 |             1759 |             1770 |                 645 |                 532 |         0
+(1 row)
+
+
+=== AMOSTRA ===
+ id  |  english   |            portuguese             | level | example_en | example_pt 
+-----+------------+-----------------------------------+-------+------------+------------
+ 228 | apple      | maÃ§Ã£                              | A1    | [VAZIO]    | [VAZIO]
+ 245 | architect  | arquiteto                         | A1    | [VAZIO]    | [VAZIO]
+ 246 | are        | presente de be usado com you, we, | A1    | [VAZIO]    | [VAZIO]
+ 252 | armor      | blindagem                         | A1    | [VAZIO]    | [VAZIO]
+ 253 | army       | exÃ©rcito                          | A1    | [VAZIO]    | [VAZIO]
+ 259 | arrow      | flecha, seta                      | A1    | [VAZIO]    | [VAZIO]
+ 260 | art        | arte                              | A1    | [VAZIO]    | [VAZIO]
+ 261 | article    | artigo                            | A1    | [VAZIO]    | [VAZIO]
+ 271 | aspect     | aspecto, aparÃªncia                | A1    | [VAZIO]    | [VAZIO]
+ 274 | assault    | assalto, agressÃ£o                 | A1    | [VAZIO]    | [VAZIO]
+ 289 | athlete    | atleta                            | A1    | [VAZIO]    | [VAZIO]
+ 290 | atlas      | atlas                             | A1    | [VAZIO]    | [VAZIO]
+ 292 | atom       | Ã¡tomo                             | A1    | [VAZIO]    | [VAZIO]
+ 294 | attach     | anexar, fixar                     | A1    | [VAZIO]    | [VAZIO]
+ 307 | audio      | Ã¡udio                             | A1    | [VAZIO]    | [VAZIO]
+ 309 | august     | agosto                            | A1    | [VAZIO]    | [VAZIO]
+ 317 | automation | automaÃ§Ã£o                         | A1    | [VAZIO]    | [VAZIO]
+ 318 | automobile | automÃ³vel                         | A1    | [VAZIO]    | [VAZIO]
+ 323 | avocado    | abacate                           | A1    | [VAZIO]    | [VAZIO]
+ 332 | bachelor   | solteiro                          | A1    | [VAZIO]    | [VAZIO]
+(20 rows)
+

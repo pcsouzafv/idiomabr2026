@@ -1,0 +1,60 @@
+english;ipa;portuguese;level;tags
+floor;;chão, andar;A1;place
+fridge;;geladeira;A1;object
+board;;quadro;A1;education
+chalk;;giz;A1;education
+eraser;;apagador;A1;education
+debit;;débito;A2;money
+queue;;fila;A2;general
+charger;;carregador;B1;tech
+storage;;armazenamento;B1;tech
+privacy;;privacidade;B1;general
+allergy;;alergia;B1;health
+approval;;aprovação;B2;work
+rejection;;rejeição;B2;work
+timeline;;cronograma;B2;work
+deliverable;;entregável;B2;work
+alignment;;alinhamento;B2;work
+ownership;;responsabilidade;B2;work
+governance;;governança;B2;work
+prerequisite;;pré-requisito;C1;work
+benchmark;;referência, parâmetro;C1;work
+interoperability;;interoperabilidade;C2;tech
+scalability;;escalabilidade;C2;tech
+algorithm;;algoritmo;B2;tech
+architecture;;arquitetura;B2;tech
+pipeline;;pipeline;B2;tech
+deployment;;implantação, deploy;B2;tech
+rollback;;reversão;B2;tech
+downtime;;indisponibilidade;B2;tech
+outage;;queda, indisponibilidade;B2;tech
+monitoring;;monitoramento;B2;tech
+telemetry;;telemetria;B2;tech
+latency;;latência;B2;tech
+throughput;;vazão;B2;tech
+bandwidth;;largura de banda;B2;tech
+encryption;;criptografia;B2;tech
+decryption;;descriptografia;B2;tech
+credential;;credencial;B2;tech
+database;;banco de dados;B2;tech
+schema;;esquema;B2;tech
+cache;;cache;B2;tech
+migrate;;migrar;B2;tech
+integrate;;integrar;B2;tech
+debug;;depurar;B2;tech
+revenue;;receita;B2;money
+pricing;;precificação;B2;money
+equity;;patrimônio líquido;B2;money
+asset;;ativo;B2;money
+clarify;;esclarecer;B2;verb
+summarize;;resumir;B2;verb
+prioritize;;priorizar;B2;verb
+validate;;validar;B2;verb
+breach;;violação;C1;general
+audit;;auditoria;C1;work
+regulation;;regulamentação;C1;work
+litigation;;litígio;C1;work
+oversight;;supervisão;C1;work
+integrity;;integridade;C1;general
+protein;;proteína;C1;health
+cholesterol;;colesterol;C1;health

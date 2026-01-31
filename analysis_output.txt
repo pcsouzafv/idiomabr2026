@@ -1,0 +1,22 @@
+Total de linhas: 10074
+Total de colunas: 11
+
+Colunas:
+  - id
+  - english
+  - ipa
+  - portuguese
+  - level
+  - word_type
+  - definition_en
+  - definition_pt
+  - example_en
+  - example_pt
+  - tags
+
+example_en vazios: 1797
+example_pt vazios: 1808
+Ambos vazios: 1797
+Pelo menos um preenchido: 8277
+
+Arquivo gerado: missing_examples__words_export (3).csv

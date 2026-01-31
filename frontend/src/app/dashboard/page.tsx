@@ -1,10 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/authStore';
-import { authApi } from '@/lib/api';
 import ThemeToggle from '@/components/ThemeToggle';
 import {
   BookOpen,
@@ -29,8 +28,6 @@ export default function DashboardPage() {
   const { user, stats, isLoading, fetchUser, fetchStats, logout } = useAuthStore();
   const router = useRouter();
   const progressBarRef = useRef<HTMLDivElement | null>(null);
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [isSavingPhone, setIsSavingPhone] = useState(false);
 
   useEffect(() => {
     fetchUser();
@@ -49,8 +46,16 @@ export default function DashboardPage() {
   }, [user, fetchStats]);
 
   useEffect(() => {
-    setPhoneNumber(user?.phone_number || '');
-  }, [user?.phone_number]);
+    const banner = Array.from(document.querySelectorAll('div')).find(
+      (div) =>
+        div.textContent?.includes('Telefone para envio de lições') &&
+        div.querySelector('input[type="tel"]') &&
+        div.querySelector('button')
+    );
+    if (banner) {
+      banner.remove();
+    }
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -72,24 +77,6 @@ export default function DashboardPage() {
       </div>
     );
   }
-
-  const handleSavePhone = async () => {
-    if (!phoneNumber.trim()) {
-      alert('Informe um telefone válido.');
-      return;
-    }
-    try {
-      setIsSavingPhone(true);
-      await authApi.updateMe({ phone_number: phoneNumber.trim() });
-      await fetchUser();
-      alert('Telefone atualizado com sucesso!');
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { detail?: string } } };
-      alert(err.response?.data?.detail || 'Erro ao atualizar telefone');
-    } finally {
-      setIsSavingPhone(false);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors">
@@ -224,39 +211,6 @@ export default function DashboardPage() {
               🎉 Parabéns! Você atingiu sua meta de hoje!
             </p>
           )}
-        </div>
-
-        {/* Phone Number */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm mb-8 transition-colors">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Telefone para envio de lições</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Precisamos do seu número para enviar lições via WhatsApp/Telegram/Discord.
-              </p>
-            </div>
-            {!user.phone_number && (
-              <span className="text-xs font-semibold text-amber-700 bg-amber-100 px-3 py-1 rounded-full">
-                Pendente
-              </span>
-            )}
-          </div>
-          <div className="mt-4 flex flex-col md:flex-row gap-3">
-            <input
-              type="tel"
-              value={phoneNumber}
-              onChange={(e) => setPhoneNumber(e.target.value)}
-              placeholder="+55 11 99999-9999"
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-900 dark:border-gray-700 dark:text-white"
-            />
-            <button
-              onClick={handleSavePhone}
-              disabled={isSavingPhone}
-              className="px-6 py-2 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition disabled:opacity-50"
-            >
-              {isSavingPhone ? 'Salvando...' : 'Salvar'}
-            </button>
-          </div>
         </div>
 
         {/* Action Buttons */}

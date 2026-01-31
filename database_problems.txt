@@ -1,0 +1,13 @@
+=== RELATÓRIO DE PROBLEMAS NO BANCO ===
+
+1. CONTAGEM:
+psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  role "postgres" does not exist
+
+
+2. AMOSTRA DE EXAMPLES VAZIOS:
+psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  role "postgres" does not exist
+
+
+3. LEVELS INVÁLIDOS:
+psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  role "postgres" does not exist
+

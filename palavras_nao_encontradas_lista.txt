@@ -1,0 +1,156 @@
+# LISTA DE PALAVRAS NÃO ENCONTRADAS NA API (87 palavras)
+# Gerado em: 04/01/2026
+# Estas palavras não foram encontradas no Free Dictionary API
+
+## ANÁLISE POR CATEGORIA:
+
+### 1. NOMES PRÓPRIOS (Pessoas):
+- jesse
+- jeremiah
+- judah
+- judith
+- julia
+- lucy
+- samantha
+- sargent
+- yeltsin
+
+### 2. NOMES PRÓPRIOS (Lugares):
+- england
+- europe
+- jericho
+- june (pode ser mês ou nome)
+- saharan
+- zurich
+- zambia
+
+### 3. PALAVRAS EM PORTUGUÊS (devem estar em word_pt, não word_en):
+- couro
+- dinamite
+- maluco
+- motorizado
+- palavra
+- postar
+- sindicato
+
+### 4. ABREVIAÇÕES/FRAGMENTOS:
+- bene
+- fac
+- graf
+- hari
+- kama
+- kato
+- knapp
+- knopf
+- lang
+- luna
+- oro
+- osiris
+- platt
+- pont
+- quia
+- sainte
+- salle
+- valle
+- vin
+- wai
+- yan
+- yu
+- zool
+- xxxiii
+
+### 5. PALAVRAS COMPOSTAS/HIFENIZADAS:
+- e-book
+
+### 6. NOMES/MARCAS ESPECÍFICAS:
+- blackie
+- haute (haute couture?)
+- lutheran
+- mexicans
+- qur'an (Alcorão)
+- sampson
+- samson
+- saturn
+- yankees
+
+## LISTA COMPLETA ALFABÉTICA:
+
+1. bene
+2. blackie
+3. couro
+4. dinamite
+5. e-book
+6. england
+7. europe
+8. fac
+9. graf
+10. hari
+11. haute
+12. jeremiah
+13. jericho
+14. jesse
+15. judah
+16. judith
+17. julia
+18. june
+19. kama
+20. kato
+21. knapp
+22. knopf
+23. lang
+24. lucy
+25. luna
+26. lutheran
+27. maluco
+28. mexicans
+29. motorizado
+30. oro
+31. osiris
+32. palavra
+33. platt
+34. pont
+35. postar
+36. quia
+37. qur'an
+38. saharan
+39. sainte
+40. salle
+41. samantha
+42. sampson
+43. samson
+44. sargent
+45. saturn
+46. sindicato
+47. valle
+48. vin
+49. wai
+50. xxxiii
+51. yan
+52. yankees
+53. yeltsin
+54. yu
+55. zambia
+56. zool
+57. zurich
+
+## RECOMENDAÇÕES:
+
+### 1. PALAVRAS EM PORTUGUÊS (7 palavras):
+Devem ser movidas para o campo word_pt ou removidas do banco se estiverem incorretamente no word_en:
+- couro, dinamite, maluco, motorizado, palavra, postar, sindicato
+
+### 2. NOMES PRÓPRIOS (16 palavras):
+Podem ser mantidos mas precisam de enriquecimento manual:
+- blackie, england, europe, jeremiah, jericho, jesse, judah, judith, julia, june, lucy, 
+  mexicans, samantha, sargent, yeltsin, zurich, zambia
+
+### 3. FRAGMENTOS/ABREVIAÇÕES (24 palavras):
+Verificar se são palavras válidas ou devem ser removidas:
+- bene, fac, graf, hari, kama, kato, knapp, knopf, lang, luna, oro, osiris, platt, pont, 
+  quia, sainte, salle, valle, vin, wai, yan, yu, zool, xxxiii
+
+### 4. PALAVRAS ESPECIAIS (10 palavras):
+Precisam de tratamento especial ou enriquecimento manual:
+- e-book, haute, lutheran, qur'an, saharan, sampson, samson, saturn, yankees
+
+## TOTAL: 57 palavras únicas identificadas no log

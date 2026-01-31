@@ -1,13 +1,26 @@
+"""Seed/atualização de palavras essenciais (gramática).
+
+Este script foi criado para preencher lacunas comuns (pronomes, verbos, etc.).
+
+Observações importantes:
+- As APIs de dicionário (Free Dictionary/Datamuse) enriquecem palavras existentes,
+  mas não fornecem uma lista completa de "todas as palavras".
+- Por isso, o fluxo correto é: (1) inserir uma lista-semente; (2) rodar enriquecimento.
+
+Por segurança, o modo padrão é DRY-RUN. Use --apply para gravar no banco.
 """
-Script para adicionar palavras faltantes ate completar 5000
-Adiciona verbos, pronomes, adverbios e palavras essenciais
-"""
+
+from __future__ import annotations
+
+import argparse
 import sys
-sys.path.append('backend')
+
+sys.path.append("backend")
+
+from sqlalchemy import func
 
 from app.core.database import SessionLocal
 from app.models.word import Word
-from sqlalchemy import func
 
 # Novas palavras para adicionar (verbos, pronomes, adverbios, etc)
 new_words = [
@@ -308,6 +321,37 @@ try:
     print("  ADICIONANDO PALAVRAS FALTANTES")
     print("=" * 60)
 
+    p = argparse.ArgumentParser(description="Seed/atualização de palavras essenciais")
+    p.add_argument("--apply", action="store_true", help="Aplica alterações no banco (default: dry-run)")
+    p.add_argument(
+        "--update-existing",
+        action="store_true",
+        help="Atualiza tags/word_type de palavras que já existem (default: False)",
+    )
+    args = p.parse_args()
+
+    def merge_tags(existing_tags: str | None, new_tag: str) -> str:
+        items = [t.strip() for t in (existing_tags or "").split(",") if t.strip()]
+        if new_tag not in items:
+            items.append(new_tag)
+        return ",".join(items)
+
+    def expected_word_type_from_tag(tag: str) -> str | None:
+        t = (tag or "").strip().lower()
+        if t.startswith("pronome"):
+            return "pronoun"
+        if t.startswith("verbo"):
+            return "verb"
+        if t.startswith("adv"):
+            return "adverb"
+        if t.startswith("prepos"):
+            return "preposition"
+        if t.startswith("conjun"):
+            return "conjunction"
+        if t in ("artigo", "determinante"):
+            return "determiner"
+        return None
+
     # Contar palavras existentes
     current_count = db.query(func.count(Word.id)).scalar()
     print(f"\nPalavras atuais no banco: {current_count}")
@@ -315,32 +359,63 @@ try:
     print(f"Total após importação: {current_count + len(new_words)}")
 
     added = 0
+    updated_existing = 0
     skipped = 0
 
     for english, ipa, portuguese, level, tags in new_words:
         # Verificar se já existe
         existing = db.query(Word).filter(func.lower(Word.english) == english.lower()).first()
         if existing:
-            skipped += 1
+            if not args.update_existing:
+                skipped += 1
+                continue
+
+            changed = False
+            # Mantém o mesmo id (preserva user_progress/reviews). Ajuste de casing só quando necessário.
+            if english == "I" and existing.english == "i":
+                existing.english = "I"
+                changed = True
+
+            # Merge tags
+            new_tags_value = merge_tags(existing.tags, tags)
+            if new_tags_value != (existing.tags or ""):
+                existing.tags = new_tags_value
+                changed = True
+
+            # Força word_type esperado para palavras gramaticais (corrige casos como you/he/my).
+            expected = expected_word_type_from_tag(tags)
+            if expected and (not existing.word_type or existing.word_type.strip().lower() != expected):
+                existing.word_type = expected
+                changed = True
+
+            if changed:
+                updated_existing += 1
+                if args.apply and updated_existing % 50 == 0:
+                    db.commit()
+                    print(f"  Atualizadas {updated_existing} palavras existentes...")
+            else:
+                skipped += 1
             continue
 
         # Criar palavra
         word = Word(
-            english=english.lower(),
+            english=english,
             ipa=ipa,
             portuguese=portuguese,
             level=level,
-            tags=tags
+            tags=tags,
+            word_type=expected_word_type_from_tag(tags),
         )
         db.add(word)
         added += 1
 
         # Commit a cada 50 palavras
-        if added % 50 == 0:
+        if args.apply and added % 50 == 0:
             db.commit()
             print(f"  Adicionadas {added} palavras...")
 
-    db.commit()
+    if args.apply:
+        db.commit()
 
     # Contagem final
     final_count = db.query(func.count(Word.id)).scalar()
@@ -349,8 +424,10 @@ try:
     print("  IMPORTACAO CONCLUIDA")
     print("=" * 60)
     print(f"Palavras adicionadas: {added}")
+    print(f"Palavras existentes atualizadas: {updated_existing}")
     print(f"Palavras ignoradas (já existentes): {skipped}")
     print(f"Total de palavras no banco: {final_count}")
+    print(f"Modo: {'APPLY' if args.apply else 'DRY-RUN'}")
     print("=" * 60)
 
 except Exception as e:

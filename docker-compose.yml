@@ -20,6 +20,16 @@ services:
     networks:
       - idiomasbr-network
 
+  # Redis (session store)
+  redis:
+    image: redis:7-alpine
+    container_name: idiomasbr-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - idiomasbr-network
+
   # Ollama (AI Local)
   ollama:
     image: ollama/ollama:latest
@@ -69,12 +79,17 @@ services:
       USE_OLLAMA_FALLBACK: ${USE_OLLAMA_FALLBACK:-false}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
       ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID:-21m00Tcm4TlvDq8ikWAM}
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-21600}
       PORT: 8000
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
       - ./backend:/app
       - backend_cache:/app/.cache  # Cache para APIs

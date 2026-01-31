@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { conversationApi } from '@/lib/api';
 import Link from 'next/link';
 
@@ -46,9 +47,14 @@ export default function ConversationPage() {
   const [autoPlay, setAutoPlay] = useState(true);
   const [autoSendOnMicEnd, setAutoSendOnMicEnd] = useState(false);
   const [autoPronunciationOnMic, setAutoPronunciationOnMic] = useState(true);
+  const [pressToTalk, setPressToTalk] = useState(false);
+  const [showInterimTranscript, setShowInterimTranscript] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState('');
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [selectedVoice, setSelectedVoice] = useState<string>('');
   const [voices, setVoices] = useState<Voice[]>([]);
+  const [browserSttAvailable, setBrowserSttAvailable] = useState(false);
+  const [preferBrowserStt, setPreferBrowserStt] = useState(true);
   const [lessonMode, setLessonMode] = useState(false);
   const [lessonActive, setLessonActive] = useState(false);
   const [lessonQuestionsText, setLessonQuestionsText] = useState('');
@@ -90,6 +96,13 @@ Prefer English.`
   const isListeningRef = useRef<boolean>(false);
   const manualStopListeningRef = useRef<boolean>(false);
   const autoPronunciationOnMicRef = useRef<boolean>(true);
+  const resumeListeningAfterSendRef = useRef<boolean>(false);
+  const showInterimTranscriptRef = useRef<boolean>(false);
+  const interimTranscriptRef = useRef<string>('');
+  const preferBrowserSttRef = useRef<boolean>(true);
+  const pressToTalkRef = useRef<boolean>(false);
+  const startListeningRef = useRef<() => void>(() => {});
+  const stopListeningRef = useRef<() => void>(() => {});
   const micRecorderRef = useRef<MediaRecorder | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const micAudioChunksRef = useRef<Blob[]>([]);
@@ -102,6 +115,10 @@ Prefer English.`
   const sttRecorderRef = useRef<MediaRecorder | null>(null);
   const sttChunksRef = useRef<Blob[]>([]);
   const startServerSttRecordingRef = useRef<() => void>(() => {});
+  const isSpeakingRef = useRef<boolean>(false);
+  const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
+  const speechRecognitionActiveRef = useRef<boolean>(false);
+  const useWebSpeechRef = useRef<boolean>(false);
 
   const conversationIdRef = useRef<string | null>(null);
   const systemPromptRef = useRef<string>('');
@@ -160,12 +177,147 @@ Prefer English.`
   }, [autoPronunciationOnMic]);
 
   useEffect(() => {
+    showInterimTranscriptRef.current = showInterimTranscript;
+    const recognition = speechRecognitionRef.current;
+    if (recognition) {
+      recognition.interimResults = showInterimTranscript;
+    }
+    if (!showInterimTranscript && interimTranscriptRef.current) {
+      interimTranscriptRef.current = '';
+      setInterimTranscript('');
+    }
+  }, [showInterimTranscript]);
+
+  useEffect(() => {
+    preferBrowserSttRef.current = preferBrowserStt;
+  }, [preferBrowserStt]);
+
+  useEffect(() => {
+    pressToTalkRef.current = pressToTalk;
+  }, [pressToTalk]);
+
+  useEffect(() => {
     isListeningRef.current = isListening;
   }, [isListening]);
+
+  useEffect(() => {
+    isSpeakingRef.current = isSpeaking;
+  }, [isSpeaking]);
 
   // Carrega vozes disponíveis
   useEffect(() => {
     loadVoices();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+    const hasTouch = navigator.maxTouchPoints > 0;
+    if (coarsePointer || hasTouch) {
+      setPressToTalk(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const SpeechRecognitionCtor =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) return;
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = 'en-US';
+    recognition.interimResults = showInterimTranscriptRef.current;
+    recognition.continuous = false;
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let finalText = finalTranscriptRef.current || '';
+      let interimText = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        const transcript = result[0]?.transcript || '';
+        if (result.isFinal) {
+          finalText += `${transcript} `;
+        } else {
+          interimText += transcript;
+        }
+      }
+
+      finalText = finalText.trim();
+      interimText = interimText.trim();
+
+      if (finalText) {
+        const currentInput = inputMessageRef.current.trim();
+        if (!currentInput || finalText.length >= currentInput.length) {
+          if (finalText !== lastTranscriptRef.current) {
+            lastTranscriptRef.current = finalText;
+            inputMessageRef.current = finalText;
+            setInputMessage(finalText);
+          }
+        }
+      }
+
+      const shouldShowInterim = showInterimTranscriptRef.current;
+      if (shouldShowInterim) {
+        if (interimText !== interimTranscriptRef.current) {
+          interimTranscriptRef.current = interimText;
+          setInterimTranscript(interimText);
+        }
+      } else if (interimTranscriptRef.current) {
+        interimTranscriptRef.current = '';
+        setInterimTranscript('');
+      }
+
+      if (finalText && autoSendOnMicEndRef.current && !isLoadingRef.current) {
+        if (finalText !== lastAutoSentTranscriptRef.current) {
+          lastAutoSentTranscriptRef.current = finalText;
+          void sendMessageRef.current(finalText);
+        }
+      }
+
+      if (finalText && !autoSendOnMicEndRef.current) {
+        manualStopListeningRef.current = true;
+        isListeningRef.current = false;
+        setIsListening(false);
+        try {
+          recognition.stop();
+        } catch {
+          // ignore
+        }
+      }
+
+      finalTranscriptRef.current = finalText;
+    };
+
+    recognition.onerror = () => {
+      speechRecognitionActiveRef.current = false;
+      if (manualStopListeningRef.current) return;
+      if (isListeningRef.current && preferBrowserSttRef.current) {
+        useWebSpeechRef.current = false;
+        startServerSttRecordingRef.current();
+      }
+    };
+
+    recognition.onend = () => {
+      speechRecognitionActiveRef.current = false;
+      if (interimTranscriptRef.current) {
+        interimTranscriptRef.current = '';
+        setInterimTranscript('');
+      }
+      if (useWebSpeechRef.current && isListeningRef.current && !manualStopListeningRef.current && !isSpeakingRef.current) {
+        setTimeout(() => {
+          try {
+            recognition.start();
+            speechRecognitionActiveRef.current = true;
+          } catch {
+            // ignore
+          }
+        }, 150);
+      }
+    };
+
+    speechRecognitionRef.current = recognition;
+    setBrowserSttAvailable(true);
   }, []);
 
   const stopMicRecording = useCallback(() => {
@@ -217,6 +369,10 @@ Prefer English.`
 
   const playTextAsAudio = useCallback(async (text: string) => {
     try {
+      if (isListeningRef.current && !manualStopListeningRef.current) {
+        stopListening();
+      }
+      isSpeakingRef.current = true;
       setIsSpeaking(true);
 
       // Stop any current audio and free object URLs
@@ -247,7 +403,15 @@ Prefer English.`
       } else {
         // If audio element isn't available, stop the speaking indicator.
         cleanupCurrentAudioUrl();
+        isSpeakingRef.current = false;
         setIsSpeaking(false);
+        if (resumeListeningAfterSendRef.current && autoSendOnMicEndRef.current && !pressToTalkRef.current) {
+          resumeListeningAfterSendRef.current = false;
+          manualStopListeningRef.current = false;
+          isListeningRef.current = true;
+          setIsListening(true);
+          startListeningRef.current();
+        }
       }
     } catch (error: unknown) {
       const statusCode = getAxiosResponseStatus(error);
@@ -265,9 +429,17 @@ Prefer English.`
       }
       console.error('Erro ao reproduzir áudio:', error);
       cleanupCurrentAudioUrl();
+      isSpeakingRef.current = false;
       setIsSpeaking(false);
+      if (resumeListeningAfterSendRef.current && autoSendOnMicEndRef.current && !pressToTalkRef.current) {
+        resumeListeningAfterSendRef.current = false;
+        manualStopListeningRef.current = false;
+        isListeningRef.current = true;
+        setIsListening(true);
+        startListeningRef.current();
+      }
     }
-  }, [cleanupCurrentAudioUrl, getAxiosResponseStatus, selectedVoice]);
+  }, [cleanupCurrentAudioUrl, getAxiosResponseStatus, selectedVoice, stopListening]);
 
   const startLesson = useCallback(async () => {
     const parsedQuestions = lessonQuestionsText
@@ -328,15 +500,9 @@ Prefer English.`
       if (autoPlay) {
         void playTextAsAudio(response.data.first_question as string);
       }
-      try {
-        manualStopListeningRef.current = false;
-        isListeningRef.current = true;
-        setIsListening(true);
-        startServerSttRecordingRef.current();
-      } catch {
-        isListeningRef.current = false;
-        setIsListening(false);
-      }
+      manualStopListeningRef.current = true;
+      isListeningRef.current = false;
+      setIsListening(false);
       setIsConfigOpen(false);
     } catch (error: unknown) {
       alert('Erro ao iniciar lição: ' + extractErrorMessage(error));
@@ -481,8 +647,15 @@ Prefer English.`
   const startServerSttRecording = useCallback(async () => {
     if (sttRecorderRef.current || typeof window === 'undefined') return;
     if (!navigator.mediaDevices?.getUserMedia) return;
+    if (isSpeakingRef.current) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       sttStreamRef.current = stream;
       sttChunksRef.current = [];
 
@@ -494,11 +667,16 @@ Prefer English.`
       analyser.fftSize = 2048;
       source.connect(analyser);
       const analyserData = new Uint8Array(analyser.fftSize);
-      let lastVoiceAt = Date.now();
       const startedAt = Date.now();
+      let lastVoiceAt = startedAt;
+      let lastFrameAt = startedAt;
+      let voiceDetected = false;
+      let voiceMs = 0;
       const silenceMs = 900;
       const minRecordMs = 1200;
-      const voiceThreshold = 0.02;
+      const maxWaitForVoiceMs = 4000;
+      const minVoiceMs = 300;
+      const voiceThreshold = 0.03;
 
       const preferredTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
       const mimeType = preferredTypes.find(
@@ -522,7 +700,7 @@ Prefer English.`
         sttRecorderRef.current = null;
         cleanupSttStream();
 
-        if (!audioBlob || audioBlob.size < 800) {
+        if (!audioBlob || audioBlob.size < 800 || !voiceDetected || voiceMs < minVoiceMs) {
           if (isListeningRef.current && !manualStopListeningRef.current) {
             startServerSttRecordingRef.current();
           }
@@ -539,8 +717,22 @@ Prefer English.`
           const transcript = (response.data?.transcript || '').trim();
           if (!transcript) return;
 
+          if (transcript === lastTranscriptRef.current) {
+            return;
+          }
+          const currentInput = inputMessageRef.current.trim();
+          if (currentInput && transcript.length <= currentInput.length) {
+            return;
+          }
+
+          lastTranscriptRef.current = transcript;
+          finalTranscriptRef.current = transcript;
           inputMessageRef.current = transcript;
           setInputMessage(transcript);
+          if (interimTranscriptRef.current) {
+            interimTranscriptRef.current = '';
+            setInterimTranscript('');
+          }
 
           if (autoSendOnMicEndRef.current && !isLoadingRef.current) {
             if (transcript !== lastAutoSentTranscriptRef.current) {
@@ -552,6 +744,12 @@ Prefer English.`
           alert('Erro ao transcrever áudio: ' + extractErrorMessage(error));
         } finally {
           setIsTranscribing(false);
+          if (!autoSendOnMicEndRef.current) {
+            manualStopListeningRef.current = true;
+            isListeningRef.current = false;
+            setIsListening(false);
+            return;
+          }
           if (isListeningRef.current && !manualStopListeningRef.current) {
             setTimeout(() => startServerSttRecordingRef.current(), 150);
           }
@@ -567,10 +765,24 @@ Prefer English.`
           sum += normalized * normalized;
         }
         const rms = Math.sqrt(sum / analyserData.length);
+        const now = Date.now();
+        const frameMs = Math.max(0, now - lastFrameAt);
+        lastFrameAt = now;
         if (rms > voiceThreshold) {
-          lastVoiceAt = Date.now();
+          voiceDetected = true;
+          voiceMs += frameMs;
+          lastVoiceAt = now;
         }
-        if (Date.now() - startedAt > minRecordMs && Date.now() - lastVoiceAt > silenceMs) {
+        if (voiceDetected) {
+          if (now - startedAt > minRecordMs && now - lastVoiceAt > silenceMs) {
+            try {
+              sttRecorderRef.current?.stop();
+            } catch {
+              // ignore
+            }
+            return;
+          }
+        } else if (now - startedAt > maxWaitForVoiceMs) {
           try {
             sttRecorderRef.current?.stop();
           } catch {
@@ -597,6 +809,146 @@ Prefer English.`
   const stopServerSttRecording = useCallback(() => {
     stopSttRecorder();
   }, [stopSttRecorder]);
+
+  const startWebSpeechRecognition = useCallback(() => {
+    const recognition = speechRecognitionRef.current;
+    if (!recognition || speechRecognitionActiveRef.current) return false;
+    try {
+      recognition.start();
+      speechRecognitionActiveRef.current = true;
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const stopWebSpeechRecognition = useCallback(() => {
+    const recognition = speechRecognitionRef.current;
+    if (!recognition) return;
+    try {
+      recognition.stop();
+    } catch {
+      // ignore
+    }
+    speechRecognitionActiveRef.current = false;
+  }, []);
+
+  useEffect(() => {
+    const shouldUseWeb = preferBrowserStt && !!speechRecognitionRef.current;
+    const wasUsingWeb = useWebSpeechRef.current;
+    useWebSpeechRef.current = shouldUseWeb;
+
+    if (isListeningRef.current) {
+      if (shouldUseWeb && !wasUsingWeb) {
+        stopServerSttRecording();
+        startWebSpeechRecognition();
+      } else if (!shouldUseWeb && wasUsingWeb) {
+        stopWebSpeechRecognition();
+        startServerSttRecordingRef.current();
+      }
+      return;
+    }
+
+    if (!shouldUseWeb && speechRecognitionActiveRef.current) {
+      stopWebSpeechRecognition();
+    }
+  }, [browserSttAvailable, preferBrowserStt, startWebSpeechRecognition, stopServerSttRecording, stopWebSpeechRecognition]);
+
+  const startListening = useCallback(() => {
+    if (useWebSpeechRef.current && speechRecognitionRef.current) {
+      startWebSpeechRecognition();
+      return;
+    }
+    startServerSttRecordingRef.current();
+  }, [startWebSpeechRecognition]);
+
+  const stopListening = useCallback(() => {
+    if (useWebSpeechRef.current && speechRecognitionRef.current) {
+      stopWebSpeechRecognition();
+      return;
+    }
+    stopServerSttRecording();
+  }, [stopServerSttRecording, stopWebSpeechRecognition]);
+
+  const clearTranscriptState = useCallback(() => {
+    setInputMessage('');
+    inputMessageRef.current = '';
+    lastTranscriptRef.current = '';
+    finalTranscriptRef.current = '';
+    lastAutoSentTranscriptRef.current = '';
+    if (interimTranscriptRef.current) {
+      interimTranscriptRef.current = '';
+      setInterimTranscript('');
+    }
+  }, []);
+
+  const beginListening = useCallback(() => {
+    try {
+      clearTranscriptState();
+      manualStopListeningRef.current = false;
+      isListeningRef.current = true;
+      setIsListening(true);
+      setIsTranscribing(false);
+      startListening();
+    } catch {
+      isListeningRef.current = false;
+      stopListening();
+      setIsListening(false);
+      alert('Nao foi possivel iniciar o microfone.');
+    }
+  }, [clearTranscriptState, startListening, stopListening]);
+
+  const endListening = useCallback((manualStop = true) => {
+    manualStopListeningRef.current = manualStop;
+    isListeningRef.current = false;
+    stopListening();
+    setIsListening(false);
+    setIsTranscribing(false);
+    if (interimTranscriptRef.current) {
+      interimTranscriptRef.current = '';
+      setInterimTranscript('');
+    }
+  }, [stopListening]);
+
+  const pauseListeningForSend = useCallback(() => {
+    if (!isListeningRef.current) return;
+    resumeListeningAfterSendRef.current = !pressToTalkRef.current;
+    manualStopListeningRef.current = true;
+    isListeningRef.current = false;
+    stopListeningRef.current();
+    setIsListening(false);
+    setIsTranscribing(false);
+    if (interimTranscriptRef.current) {
+      interimTranscriptRef.current = '';
+      setInterimTranscript('');
+    }
+  }, []);
+
+  const resumeListeningAfterSend = useCallback(() => {
+    if (!resumeListeningAfterSendRef.current) return;
+    if (pressToTalkRef.current) {
+      resumeListeningAfterSendRef.current = false;
+      return;
+    }
+    if (!autoSendOnMicEndRef.current) {
+      resumeListeningAfterSendRef.current = false;
+      return;
+    }
+    if (isSpeakingRef.current) return;
+    resumeListeningAfterSendRef.current = false;
+    manualStopListeningRef.current = false;
+    isListeningRef.current = true;
+    setIsListening(true);
+    setTimeout(() => startListeningRef.current(), 150);
+  }, []);
+
+  useEffect(() => {
+    startListeningRef.current = startListening;
+  }, [startListening]);
+
+  useEffect(() => {
+    stopListeningRef.current = stopListening;
+  }, [stopListening]);
 
   const startMicRecording = useCallback(async () => {
     if (micRecorderRef.current || typeof window === 'undefined') return;
@@ -731,15 +1083,9 @@ Prefer English.`
           timestamp: new Date()
         }
       ]);
-      try {
-        manualStopListeningRef.current = false;
-        isListeningRef.current = true;
-        setIsListening(true);
-        startServerSttRecordingRef.current();
-      } catch {
-        isListeningRef.current = false;
-        setIsListening(false);
-      }
+      manualStopListeningRef.current = true;
+      isListeningRef.current = false;
+      setIsListening(false);
 
       setIsConfigOpen(false);
     } catch (error: unknown) {
@@ -756,9 +1102,16 @@ Prefer English.`
     const userMessage = (overrideMessage ?? inputMessageRef.current).trim();
     if (!userMessage) return;
 
+    pauseListeningForSend();
     inputMessageRef.current = '';
     lastTranscriptRef.current = '';
+    finalTranscriptRef.current = '';
+    lastAutoSentTranscriptRef.current = '';
     setInputMessage('');
+    if (interimTranscriptRef.current) {
+      interimTranscriptRef.current = '';
+      setInterimTranscript('');
+    }
     isLoadingRef.current = true;
     setIsLoading(true);
 
@@ -841,8 +1194,9 @@ Prefer English.`
     } finally {
       isLoadingRef.current = false;
       setIsLoading(false);
+      resumeListeningAfterSend();
     }
-  }, [autoPlay, ensureConversationStarted, extractErrorMessage, lessonActive, lessonMode, playTextAsAudio]);
+  }, [autoPlay, ensureConversationStarted, extractErrorMessage, lessonActive, lessonMode, pauseListeningForSend, playTextAsAudio, resumeListeningAfterSend]);
 
   useEffect(() => {
     sendMessageRef.current = sendMessage;
@@ -854,35 +1208,38 @@ Prefer English.`
     }
   }, [lessonFinalFeedback, loadLessonAttempts]);
 
+  const handleMicPointerDown = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!pressToTalk) return;
+    event.preventDefault();
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+    resumeListeningAfterSendRef.current = false;
+    if (isListeningRef.current) return;
+    beginListening();
+  }, [beginListening, pressToTalk]);
+
+  const handleMicPointerUp = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!pressToTalk) return;
+    event.preventDefault();
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+    if (!isListeningRef.current) return;
+    endListening(true);
+  }, [endListening, pressToTalk]);
+
   const toggleListening = () => {
+    resumeListeningAfterSendRef.current = false;
     if (isListening) {
-      try {
-        manualStopListeningRef.current = true;
-        isListeningRef.current = false;
-        stopServerSttRecording();
-      } finally {
-        setIsListening(false);
-      }
+      endListening(true);
       return;
     }
-
-    try {
-      setInputMessage('');
-      inputMessageRef.current = '';
-      lastTranscriptRef.current = '';
-      finalTranscriptRef.current = '';
-      lastAutoSentTranscriptRef.current = '';
-      manualStopListeningRef.current = false;
-      isListeningRef.current = true;
-      setIsListening(true);
-      setIsTranscribing(false);
-      startServerSttRecordingRef.current();
-    } catch {
-      isListeningRef.current = false;
-      stopServerSttRecording();
-      setIsListening(false);
-      alert('Não foi possível iniciar o microfone.');
-    }
+    beginListening();
   };
 
   const endConversation = async () => {
@@ -915,32 +1272,32 @@ Prefer English.`
       <div className="container mx-auto px-4 py-8 max-w-6xl">
         {/* Header */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 mb-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-gray-800 dark:text-white mb-2">
+              <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white mb-2">
                 🎙️ AI Conversation Practice
               </h1>
               <p className="text-gray-600 dark:text-gray-300">
                 Pratique inglês com conversação full-time usando IA
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2 w-full md:w-auto">
               <Link
                 href="/dashboard"
-                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
+                className="w-full sm:w-auto px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
               >
                 ← Dashboard
               </Link>
               <button
                 onClick={() => setIsConfigOpen(!isConfigOpen)}
-                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
+                className="w-full sm:w-auto px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
               >
                 ⚙️ Config
               </button>
               {conversationId && (
                 <button
                   onClick={endConversation}
-                  className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+                  className="w-full sm:w-auto px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
                 >
                   🛑 Encerrar
                 </button>
@@ -994,6 +1351,54 @@ Prefer English.`
                 </label>
                 <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
                   Desative para treinar a frase com calma: o microfone só preenche o campo, e você envia quando quiser.
+                </p>
+              </div>
+
+              <div className="mb-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={preferBrowserStt}
+                    onChange={(e) => setPreferBrowserStt(e.target.checked)}
+                    className="w-4 h-4"
+                    disabled={!browserSttAvailable}
+                  />
+                  <span>Usar reconhecimento do navegador quando disponivel</span>
+                </label>
+                {!browserSttAvailable && (
+                  <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
+                    Seu navegador nao suporta Web Speech. Usando STT do servidor.
+                  </p>
+                )}
+              </div>
+
+              <div className="mb-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={pressToTalk}
+                    onChange={(e) => setPressToTalk(e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  <span>Segurar para falar (push-to-talk)</span>
+                </label>
+                <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
+                  Recomendado no celular para evitar transcricoes acidentais.
+                </p>
+              </div>
+
+              <div className="mb-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={showInterimTranscript}
+                    onChange={(e) => setShowInterimTranscript(e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  <span>Mostrar rascunho do microfone (pode oscilar)</span>
+                </label>
+                <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
+                  Desative para ver apenas o texto final.
                 </p>
               </div>
 
@@ -1115,7 +1520,7 @@ Prefer English.`
         </div>
 
         {/* Chat Area */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl overflow-hidden flex flex-col min-h-[520px]">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl overflow-hidden flex flex-col min-h-[420px] sm:min-h-[520px]">
           {/* Messages / Intro */}
           <div className="flex-1 min-h-[260px] max-h-[420px] overflow-y-auto p-6 space-y-4">
             {lessonMode && conversationId && (
@@ -1152,7 +1557,7 @@ Prefer English.`
                     className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
-                      className={`max-w-[70%] rounded-2xl p-4 ${
+                      className={`max-w-[85%] sm:max-w-[70%] rounded-2xl p-4 ${
                         message.role === 'user'
                           ? 'bg-blue-500 text-white'
                           : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white'
@@ -1160,7 +1565,7 @@ Prefer English.`
                     >
                       <div className="flex items-start gap-2">
                         <div className="flex-1">
-                          <p className="whitespace-pre-wrap">{message.content}</p>
+                          <p className="whitespace-pre-wrap break-words">{message.content}</p>
                           <p className="text-xs mt-2 opacity-70">
                             {message.timestamp.toLocaleTimeString()}
                           </p>
@@ -1214,7 +1619,7 @@ Prefer English.`
 
           {/* Input Area (sempre visível) */}
           <div className="border-t dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900">
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <label htmlFor="messageInput" className="sr-only">Mensagem</label>
               <textarea
                 id="messageInput"
@@ -1227,33 +1632,45 @@ Prefer English.`
                   ? "Inicie a lição para responder às perguntas..."
                   : "Digite sua mensagem... (Enter para enviar — microfone pode auto-enviar ao terminar de falar)"
                 }
-                className="flex-1 p-3 border rounded-xl resize-none dark:bg-gray-800 dark:border-gray-600 dark:text-white"
+                className="w-full sm:flex-1 p-3 border rounded-xl resize-none dark:bg-gray-800 dark:border-gray-600 dark:text-white"
                 rows={2}
                 disabled={isLoading}
               />
               <button
-                onClick={toggleListening}
+                onClick={pressToTalk ? undefined : toggleListening}
+                onPointerDown={handleMicPointerDown}
+                onPointerUp={handleMicPointerUp}
+                onPointerLeave={handleMicPointerUp}
+                onPointerCancel={handleMicPointerUp}
                 disabled={isLoading}
-                className={`px-4 py-3 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed ${
+                className={`w-full sm:w-auto px-4 py-3 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed ${
                   isListening
                     ? 'bg-red-500 text-white hover:bg-red-600'
                     : 'bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600'
                 }`}
-                title={isListening ? 'Parar microfone' : 'Falar (microfone)'}
+                title={
+                  pressToTalk
+                    ? isListening
+                      ? 'Solte para parar'
+                      : 'Segure para falar'
+                    : isListening
+                      ? 'Parar microfone'
+                      : 'Falar (microfone)'
+                }
               >
-                {isListening ? '🛑' : '🎤'}
+                {isListening ? '????' : '????'}
               </button>
               <button
                 onClick={() => sendMessage()}
                 disabled={isLoading || !inputMessage.trim() || (lessonMode && !lessonActive)}
-                className="px-6 py-3 bg-blue-500 text-white rounded-xl font-bold hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full sm:w-auto px-6 py-3 bg-blue-500 text-white rounded-xl font-bold hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? '⏳' : '📤'}
               </button>
               <button
                 onClick={isRecordingPronunciation ? stopPronunciationRecording : startPronunciationRecording}
                 disabled={isLoading || !lastUserMessageRef.current}
-                className={`px-4 py-3 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed ${
+                className={`w-full sm:w-auto px-4 py-3 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed ${
                   isRecordingPronunciation
                     ? 'bg-red-500 text-white hover:bg-red-600'
                     : 'bg-emerald-500 text-white hover:bg-emerald-600'
@@ -1266,9 +1683,15 @@ Prefer English.`
 
             {isListening && (
               <div className="mt-2 text-sm text-red-600 dark:text-red-400">
-                🎤 Ouvindo... clique no microfone para parar.
+                🎤 Ouvindo... {pressToTalk ? 'solte para parar.' : 'clique no microfone para parar.'}
               </div>
             )}
+            {showInterimTranscript && interimTranscript && (
+              <div className="mt-2 text-sm text-gray-600 dark:text-gray-300 italic">
+                Rascunho: {interimTranscript}
+              </div>
+            )}
+
             {isTranscribing && !isListening && (
               <div className="mt-2 text-sm text-amber-600 dark:text-amber-400">
                 📝 Transcrevendo áudio...
@@ -1399,11 +1822,31 @@ Prefer English.`
           ref={audioRef}
           onEnded={() => {
             cleanupCurrentAudioUrl();
+            isSpeakingRef.current = false;
             setIsSpeaking(false);
+            if (resumeListeningAfterSendRef.current && autoSendOnMicEndRef.current && !pressToTalkRef.current) {
+              resumeListeningAfterSendRef.current = false;
+              manualStopListeningRef.current = false;
+              isListeningRef.current = true;
+              setIsListening(true);
+              startListening();
+              return;
+            }
+            if (isListeningRef.current && !manualStopListeningRef.current) {
+              startListening();
+            }
           }}
           onError={() => {
             cleanupCurrentAudioUrl();
+            isSpeakingRef.current = false;
             setIsSpeaking(false);
+            if (resumeListeningAfterSendRef.current && autoSendOnMicEndRef.current && !pressToTalkRef.current) {
+              resumeListeningAfterSendRef.current = false;
+              manualStopListeningRef.current = false;
+              isListeningRef.current = true;
+              setIsListening(true);
+              startListening();
+            }
           }}
         />
       </div>

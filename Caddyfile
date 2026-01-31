@@ -1,0 +1,20 @@
+{
+  # Ajuste se quiser outro e-mail de notificações do Let's Encrypt
+  email admin@idiomasbr.com
+}
+
+app.idiomasbr.com {
+  reverse_proxy frontend:3000
+}
+
+api.idiomasbr.com {
+  reverse_proxy backend:8000
+}
+
+idiomasbr.com {
+  redir https://app.idiomasbr.com{uri} permanent
+}
+
+www.idiomasbr.com {
+  redir https://app.idiomasbr.com{uri} permanent
+}

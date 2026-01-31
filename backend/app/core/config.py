@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     environment: str = "development"  # development|production
     debug: bool = True
 
+    # Session store (Redis)
+    redis_enabled: bool = False
+    redis_url: str = ""
+    session_ttl_seconds: int = 6 * 60 * 60
+
 
 @lru_cache()
 def get_settings() -> Settings:

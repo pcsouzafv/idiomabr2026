@@ -49,6 +49,15 @@ router = APIRouter(prefix="/api/conversation", tags=["Conversation"])
 
 logger = logging.getLogger(__name__)
 
+def _ensure_conversation_owner(conversation_id: str, current_user: User) -> None:
+    conversation = conversation_ai_service.get_conversation(conversation_id)
+    if not conversation or conversation.get("user_id") != current_user.id:
+        # Avoid leaking whether the conversation exists for another user.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversa\u00e7\u00e3o n\u00e3o encontrada",
+        )
+
 
 # ==================== TEXT-TO-SPEECH ====================
 
@@ -278,6 +287,7 @@ async def send_message(
     Envia uma mensagem na conversação e recebe resposta da IA com áudio
     """
     try:
+        _ensure_conversation_owner(conversation_id, current_user)
         # Envia mensagem e recebe resposta (texto) e opcionalmente áudio (bytes)
         result = conversation_ai_service.send_message(
             conversation_id=conversation_id,
@@ -321,6 +331,7 @@ async def send_lesson_message(
 ):
     """Envia resposta do aluno na lição e recebe resposta da IA"""
     try:
+        _ensure_conversation_owner(conversation_id, current_user)
         result = conversation_ai_service.send_lesson_message(
             conversation_id=conversation_id,
             user_message=request.message,
@@ -337,7 +348,7 @@ async def send_lesson_message(
                 except Exception:
                     score = None
 
-            conversation = conversation_ai_service.active_conversations.get(conversation_id, {})
+            conversation = conversation_ai_service.get_conversation(conversation_id) or {}
             lesson = conversation.get("lesson") or {}
             attempt = ConversationLessonAttempt(
                 user_id=current_user.id,
@@ -506,6 +517,7 @@ async def get_conversation_history(
     Obtém o histórico completo de uma conversação
     """
     try:
+        _ensure_conversation_owner(conversation_id, current_user)
         messages = conversation_ai_service.get_conversation_history(conversation_id)
         
         return ConversationHistoryResponse(
@@ -537,6 +549,7 @@ async def end_conversation(
     Encerra uma conversação
     """
     try:
+        _ensure_conversation_owner(conversation_id, current_user)
         summary = conversation_ai_service.end_conversation(conversation_id)
         
         return ConversationEndResponse(

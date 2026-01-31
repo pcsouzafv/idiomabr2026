@@ -1,0 +1,104 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: idiomasbr-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-idiomasbr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-idiomasbr}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-idiomasbr}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - idiomasbr-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: idiomasbr-redis
+    restart: unless-stopped
+    networks:
+      - idiomasbr-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: idiomasbr-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-idiomasbr}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-idiomasbr}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 10080
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      CONVERSATION_AI_PROVIDER: ${CONVERSATION_AI_PROVIDER:-auto}
+      CONVERSATION_OPENAI_MODEL: ${CONVERSATION_OPENAI_MODEL:-gpt-4o-mini}
+      CONVERSATION_DEEPSEEK_MODEL: ${CONVERSATION_DEEPSEEK_MODEL:-deepseek-chat}
+      CONVERSATION_HISTORY_MESSAGES: ${CONVERSATION_HISTORY_MESSAGES:-10}
+      CONVERSATION_MAX_TOKENS: ${CONVERSATION_MAX_TOKENS:-700}
+      CONVERSATION_TEMPERATURE: ${CONVERSATION_TEMPERATURE:-0.7}
+      CONVERSATION_TIMEOUT_SECONDS: ${CONVERSATION_TIMEOUT_SECONDS:-30}
+      CONVERSATION_MAX_RETRIES: ${CONVERSATION_MAX_RETRIES:-1}
+      OPENAI_TTS_BASE_URL: ${OPENAI_TTS_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_TTS_MODEL: ${OPENAI_TTS_MODEL:-tts-1}
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-21600}
+      USE_OLLAMA_FALLBACK: "false"
+      OLLAMA_URL: ""
+      PORT: 8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - idiomasbr-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-https://api.idiomasbr.com}
+    container_name: idiomasbr-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.idiomasbr.com}
+      PORT: 3000
+    depends_on:
+      - backend
+    networks:
+      - idiomasbr-network
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: idiomasbr-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - idiomasbr-network
+
+networks:
+  idiomasbr-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

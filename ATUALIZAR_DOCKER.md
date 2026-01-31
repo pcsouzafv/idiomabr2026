@@ -1,4 +1,4 @@
-# ⚡ Guia Rápido - Atualizar Docker
+![1769884912433](image/ATUALIZAR_DOCKER/1769884912433.png)# ⚡ Guia Rápido - Atualizar Docker
 
 ## 🎯 Um Comando Só
 
@@ -21,17 +21,22 @@ Se preferir fazer manualmente:
 
 ### 1. Parar containers
 ```bash
-docker-compose down
+docker compose down
 ```
 
-### 2. Rebuild
+### 2. Baixar imagens
 ```bash
-docker-compose build --no-cache
+docker compose pull
 ```
 
-### 3. Iniciar
+### 3. Rebuild (atualiza base images)
 ```bash
-docker-compose up -d
+docker compose build --no-cache --pull
+```
+
+### 4. Iniciar
+```bash
+docker compose up -d
 ```
 
 ### 4. Aguardar (15 segundos)
@@ -42,7 +47,7 @@ timeout /t 15
 ### 5. Aplicar migração
 ```bash
 docker cp backend\migrations\add_word_details.sql idiomasbr-postgres:/tmp/
-docker-compose exec postgres psql -U idiomasbr -d idiomasbr -f /tmp/add_word_details.sql
+docker compose exec postgres psql -U idiomasbr -d idiomasbr -f /tmp/add_word_details.sql
 ```
 
 ---
@@ -51,7 +56,7 @@ docker-compose exec postgres psql -U idiomasbr -d idiomasbr -f /tmp/add_word_det
 
 ### Ver containers rodando
 ```bash
-docker-compose ps
+docker compose ps
 ```
 
 **Deve mostrar 3 containers "Up":**

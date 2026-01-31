@@ -10,6 +10,7 @@ import json
 from typing import Optional, Dict, Tuple
 import sys
 import io
+import argparse
 
 # Fix Windows console encoding
 if sys.platform == 'win32':
@@ -115,7 +116,7 @@ def generate_smart_example(word: str, word_type: str = 'unknown') -> Tuple[Optio
     template_list = templates.get(word_type, templates['unknown'])
     example_en = template_list[0]
 
-    # Traduz
+    # Traduz (pode falhar; ainda assim mantém example_en)
     example_pt = translate_sentence(example_en)
 
     return (example_en, example_pt)
@@ -159,7 +160,7 @@ def detect_word_type(word: str, definition: str = '') -> str:
 
     return 'unknown'
 
-def populate_examples():
+def populate_examples(*, limit: int = 100, min_id: int | None = None, max_id: int | None = None, delay_s: float = 0.5):
     """
     Popula exemplos no banco de dados
     """
@@ -171,15 +172,27 @@ def populate_examples():
 
         # Busca palavras sem exemplos
         print("\n[SEARCH] Buscando palavras sem exemplos...")
-        cursor.execute("""
-            SELECT id, english
-            FROM words
-            WHERE (example_en IS NULL OR example_en = '')
-                AND LENGTH(english) < 20
-                AND english ~ '^[a-z]+$'
-            ORDER BY id
-            LIMIT 100
-        """)
+        where_parts = [
+            "((example_en IS NULL OR example_en = '') OR (example_sentences IS NULL OR example_sentences = ''))",
+            "LENGTH(english) < 20",
+            "english ~* '^[a-z]+$'",
+        ]
+        params = []
+        if min_id is not None:
+            where_parts.append("id >= %s")
+            params.append(min_id)
+        if max_id is not None:
+            where_parts.append("id <= %s")
+            params.append(max_id)
+
+        sql = (
+            "SELECT id, english, example_en, example_pt, example_sentences "
+            "FROM words "
+            f"WHERE {' AND '.join(where_parts)} "
+            "ORDER BY id "
+            f"LIMIT {int(limit)}"
+        )
+        cursor.execute(sql, tuple(params))
 
         words = cursor.fetchall()
         print(f"[OK] Encontradas {len(words)} palavras para processar\n")
@@ -187,8 +200,25 @@ def populate_examples():
         updated = 0
         failed = 0
 
-        for idx, (word_id, english) in enumerate(words, 1):
+        for idx, (word_id, english, existing_example_en, existing_example_pt, existing_example_sentences) in enumerate(words, 1):
             print(f"\n[{idx}/{len(words)}] Processando: {english}")
+
+            # Caso simples: já tem example_en, mas falta o JSON example_sentences
+            if (existing_example_en or "").strip() and not (existing_example_sentences or "").strip():
+                example_en = (existing_example_en or "").strip()
+                example_pt = (existing_example_pt or "").strip() if existing_example_pt else ""
+                example_sentences = json.dumps([
+                    {"en": example_en, "pt": example_pt}
+                ])
+                cursor.execute(
+                    "UPDATE words SET example_sentences = %s WHERE id = %s",
+                    (example_sentences, word_id),
+                )
+                conn.commit()
+                print("  [UPDATE] Preenchido example_sentences a partir do exemplo existente")
+                updated += 1
+                time.sleep(float(delay_s))
+                continue
 
             # Tenta buscar exemplo real primeiro
             result = get_example_from_freedict(english)
@@ -214,13 +244,21 @@ def populate_examples():
                 example_en, example_pt = generate_smart_example(english, word_type)
                 print(f"  [OK] Exemplo gerado: {example_en}")
 
-            # Atualiza banco
-            if example_en and example_pt:
+            # Atualiza banco (salva EN mesmo se PT falhar)
+            if example_en:
+                example_sentences = json.dumps([
+                    {"en": example_en, "pt": example_pt or ""}
+                ])
                 cursor.execute("""
                     UPDATE words
-                    SET example_en = %s, example_pt = %s
+                    SET example_en = %s,
+                        example_pt = %s,
+                        example_sentences = CASE
+                            WHEN (example_sentences IS NULL OR example_sentences = '') THEN %s
+                            ELSE example_sentences
+                        END
                     WHERE id = %s
-                """, (example_en, example_pt, word_id))
+                """, (example_en, example_pt or "", example_sentences, word_id))
                 conn.commit()
                 print(f"  [UPDATE] Atualizado no banco de dados!")
                 updated += 1
@@ -229,7 +267,7 @@ def populate_examples():
                 failed += 1
 
             # Rate limiting
-            time.sleep(0.5)
+            time.sleep(float(delay_s))
 
             # Checkpoint
             if idx % 20 == 0:
@@ -257,4 +295,11 @@ if __name__ == "__main__":
     print("="*60)
     print("GERADOR DE EXEMPLOS - IdiomasBR")
     print("="*60)
-    populate_examples()
+    parser = argparse.ArgumentParser(description="Gera example_en/example_pt para palavras sem exemplo")
+    parser.add_argument("--limit", type=int, default=100, help="Quantas palavras processar (default: 100)")
+    parser.add_argument("--min-id", type=int, help="Processar apenas id >= min-id")
+    parser.add_argument("--max-id", type=int, help="Processar apenas id <= max-id")
+    parser.add_argument("--delay", type=float, default=0.5, help="Delay entre palavras (default: 0.5)")
+    args = parser.parse_args()
+
+    populate_examples(limit=args.limit, min_id=args.min_id, max_id=args.max_id, delay_s=args.delay)

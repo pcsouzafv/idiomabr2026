@@ -53,11 +53,14 @@ def get_current_user(
         user_id_raw = payload.get("sub")
         if user_id_raw is None:
             raise credentials_exception
-        user_id: str = str(user_id_raw)
+        try:
+            user_id = int(user_id_raw)
+        except (TypeError, ValueError):
+            raise credentials_exception
     except JWTError:
         raise credentials_exception
     
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise credentials_exception
     return user
@@ -75,11 +78,14 @@ def get_current_user_optional(
         user_id_raw = payload.get("sub")
         if user_id_raw is None:
             return None
-        user_id: str = str(user_id_raw)
+        try:
+            user_id = int(user_id_raw)
+        except (TypeError, ValueError):
+            return None
     except JWTError:
         return None
 
-    return db.query(User).filter(User.id == int(user_id)).first()
+    return db.query(User).filter(User.id == user_id).first()
 
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:

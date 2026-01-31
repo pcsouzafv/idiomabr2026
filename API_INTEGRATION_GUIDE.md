@@ -170,6 +170,59 @@ if api_data:
 db.commit()
 ```
 
+### Opção 5: Crescer o Vocabulário (10k/20k/...) com Seed Lists
+
+As APIs de dicionário **não fornecem uma lista completa de palavras**; elas só enriquecem palavras que você já tem.
+
+Fluxo recomendado para “quantas conseguirmos” (mantendo dados do usuário seguros):
+
+1. **Gerar/obter uma lista-semente (CSV)**
+
+- Você pode gerar um CSV incremental com palavras novas (não existentes no banco) usando:
+
+```bash
+docker exec -i idiomasbr-backend python scripts/generate_seed_words_extra.py --target 300 --out seed_words_extra_unique_v2.csv
+```
+
+- Ou usar qualquer CSV no formato:
+
+`english;ipa;portuguese;level;tags`
+
+- Se você tiver uma lista “só inglês” (1 palavra por linha), gere um CSV pronto para importação usando tradução EN→PT (MyMemory) + cache/resume:
+
+```bash
+docker exec -i idiomasbr-backend python scripts/wordlist_to_seed_csv.py --in data/wordlist_20k.txt --out data/seed_20k.csv --tag pack:20k --translate --translate-delay 0.4 --cache backend/data/translation_cache_mymemory.json
+```
+
+Observações:
+- O banco exige `portuguese` (NOT NULL), então o script **pula palavras sem tradução** para manter o CSV importável.
+- Para rodar em lotes, use `--limit 5000` e depois repita com outra lista/arquivo.
+
+2. **Importar o CSV para o banco**
+
+- Importador “seguro” (DRY-RUN por padrão):
+
+```bash
+docker exec -i idiomasbr-backend python scripts/import_seed_words_csv.py --file data/seed_words_extra_unique_v3.csv
+docker exec -i idiomasbr-backend python scripts/import_seed_words_csv.py --file data/seed_words_extra_unique_v3.csv --apply
+```
+
+3. **Enriquecer via API só o que está faltando**
+
+Por padrão o enriquecimento em massa pula palavras já enriquecidas. Então após importar novas palavras:
+
+```bash
+docker-compose exec backend python enrich_words_api.py --delay 0.3 --commit-every 50
+```
+
+4. **“Gramática rica” para módulos/jogos**
+
+Para garantir alta cobertura de pronomes/auxiliares/modais/conectivos/etc., rode também o seed de gramática:
+
+```bash
+docker exec -i idiomasbr-backend python /app/add_missing_words.py --update-existing --apply
+```
+
 ## ⚡ Performance e Rate Limiting
 
 ### Cache Automático

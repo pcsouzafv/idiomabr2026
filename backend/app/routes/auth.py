@@ -90,7 +90,7 @@ def update_me(
     """Atualizar dados do usuário"""
     if user_data.name:
         current_user.name = user_data.name  # type: ignore[assignment]
-    if user_data.daily_goal:
+    if user_data.daily_goal is not None:
         current_user.daily_goal = user_data.daily_goal  # type: ignore[assignment]
     if user_data.phone_number:
         phone_number = user_data.phone_number.strip()

@@ -1,0 +1,28 @@
+bad_id,bad_english,bad_portuguese,bad_ipa,target_id,target_english,target_portuguese,target_ipa,action
+582,cunhado,brɑ:t,brought,5022,brought,trouxe,brɔːt,delete_bad_row
+656,caloria,keɪm,came,5015,came,veio,keɪm,delete_bad_row
+1012,continente,kəntɪniu,continue,5037,continue,continuar,kəntɪnjuː,delete_bad_row
+1757,letra f,Pronúncia,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+2069,letra g,Pronúncia,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+2209,letra h,Pronúncia Tradução,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+2343,letra i,Pronúncia,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+2491,letra j,Pronúncia,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+2531,letra k,Pronúncia,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+2564,letra l,Pronúncia,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+2709,letra m,Pronúncia,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+2915,letra n,Pronúncia,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+3115,letra p,Pronúncia,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+3490,letra r,Pronúncia,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+3765,letra s,Pronúncia,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+3812,saxofone,seɪ,say,5016,say,dizer,seɪ,delete_bad_row
+4471,mesmos(as),ðɛn,then,5043,then,então,ðen,delete_bad_row
+4559,em dinheiro,toʊld,told,5017,told,"contou, disse",toʊld,delete_bad_row
+4677,letra u,Pronúncia,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+4736,letra v,Pronúncia,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+4810,letra w,Pronúncia,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+4895,white-,uaɪtk ɑ:l ər,collar,884,collar,"coleira, colarinho",kɑ:l ər,delete_bad_row
+4960,que vale a pena,"uʊd, uəd*",would,5014,would,iria,wʊd,delete_bad_row
+4977,letra x,Pronúncia Tradução,Palavra,1495,palavra,Tradução,Pronúncia,skip_target_incomplete
+4888,qualquer que,uaiəl,while,5050,while,enquanto,waɪl,delete_bad_row
+5045,yet,"ainda, já",jet,2504,jet,"jato, avião a jato; esguicho",djɛt,delete_bad_row
+515,borne,particípio passado de bear,born,514,born,"nascido, nato",born,delete_bad_row

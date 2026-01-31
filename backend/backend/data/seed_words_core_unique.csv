@@ -1,0 +1,363 @@
+english;ipa;portuguese;level;tags
+be;;ser, estar;A1;verb
+have;;ter;A1;verb
+do;;fazer;A1;verb
+go;;ir;A1;verb
+come;;vir;A1;verb
+make;;fazer, criar;A1;verb
+take;;pegar, levar;A1;verb
+get;;conseguir, obter;A1;verb
+give;;dar;A1;verb
+want;;querer;A1;verb
+need;;precisar;A1;verb
+like;;gostar;A1;verb
+love;;amar;A1;verb
+know;;saber, conhecer;A1;verb
+think;;pensar;A1;verb
+see;;ver;A1;verb
+hear;;ouvir;A1;verb
+say;;dizer;A1;verb
+speak;;falar;A1;verb
+read;;ler;A1;verb
+write;;escrever;A1;verb
+eat;;comer;A1;verb
+drink;;beber;A1;verb
+sleep;;dormir;A1;verb
+wake;;acordar;A1;verb
+work;;trabalhar;A1;verb
+study;;estudar;A1;verb
+play;;brincar, jogar;A1;verb
+live;;viver, morar;A1;verb
+open;;abrir;A1;verb
+close;;fechar;A1;verb
+buy;;comprar;A1;verb
+sell;;vender;A1;verb
+pay;;pagar;A1;verb
+help;;ajudar;A1;verb
+call;;ligar, chamar;A1;verb
+wait;;esperar;A1;verb
+start;;começar;A1;verb
+stop;;parar;A1;verb
+walk;;caminhar;A1;verb
+run;;correr;A1;verb
+sit;;sentar;A1;verb
+stand;;ficar em pé;A1;verb
+bring;;trazer;A1;verb
+leave;;sair, deixar;A1;verb
+put;;colocar;A1;verb
+find;;encontrar;A1;verb
+look;;olhar;A1;verb
+listen;;escutar;A1;verb
+ask;;perguntar;A1;verb
+answer;;responder;A1;verb
+show;;mostrar;A1;verb
+use;;usar;A1;verb
+try;;tentar;A1;verb
+learn;;aprender;A1;verb
+remember;;lembrar;A1;verb
+forget;;esquecer;A1;verb
+cook;;cozinhar;A1;verb
+clean;;limpar;A1;verb
+wash;;lavar;A1;verb
+watch;;assistir;A1;verb
+visit;;visitar;A1;verb
+travel;;viajar;A2;verb
+arrive;;chegar;A2;verb
+choose;;escolher;A2;verb
+change;;mudar, trocar;A2;verb
+explain;;explicar;A2;verb
+invite;;convidar;A2;verb
+enjoy;;aproveitar, gostar;A2;verb
+plan;;planejar;A2;verb
+decide;;decidir;A2;verb
+agree;;concordar;A2;verb
+improve;;melhorar;B1;verb
+increase;;aumentar;B1;verb
+reduce;;reduzir;B1;verb
+suggest;;sugerir;B1;verb
+recommend;;recomendar;B1;verb
+avoid;;evitar;B1;verb
+allow;;permitir;B1;verb
+accept;;aceitar;B1;verb
+refuse;;recusar;B1;verb
+prevent;;prevenir;B1;verb
+support;;apoiar;B1;verb
+develop;;desenvolver;B1;verb
+compare;;comparar;B1;verb
+prepare;;preparar;B1;verb
+protect;;proteger;B1;verb
+analyze;;analisar;B2;verb
+evaluate;;avaliar;B2;verb
+negotiate;;negociar;B2;verb
+emphasize;;enfatizar;B2;verb
+justify;;justificar;B2;verb
+contribute;;contribuir;B2;verb
+maintain;;manter;B2;verb
+persuade;;persuadir;B2;verb
+assume;;assumir, presumir;B2;verb
+define;;definir;B2;verb
+implement;;implementar;B2;verb
+optimize;;otimizar;B2;verb
+facilitate;;facilitar;C1;verb
+anticipate;;antecipar;C1;verb
+consolidate;;consolidar;C1;verb
+mitigate;;mitigar;C1;verb
+comply;;cumprir;C1;verb
+assess;;avaliar;C1;verb
+allocate;;alocar, destinar;C1;verb
+leverage;;aproveitar, potencializar;C1;verb
+articulate;;articular, expressar;C1;verb
+scrutinize;;examinar cuidadosamente;C1;verb
+conceptualize;;conceitualizar;C2;verb
+elucidate;;elucidar;C2;verb
+extrapolate;;extrapolar;C2;verb
+corroborate;;corroborar;C2;verb
+reconcile;;reconciliar;C2;verb
+juxtapose;;justapor;C2;verb
+substantiate;;fundamentar, comprovar;C2;verb
+disseminate;;disseminar;C2;verb
+synthesize;;sintetizar;C2;verb
+underscore;;ressaltar;C2;verb
+man;;homem;A1;people
+woman;;mulher;A1;people
+boy;;menino;A1;people
+girl;;menina;A1;people
+child;;criança;A1;people
+baby;;bebê;A1;people
+friend;;amigo;A1;people
+family;;família;A1;people
+mother;;mãe;A1;people
+father;;pai;A1;people
+sister;;irmã;A1;people
+brother;;irmão;A1;people
+teacher;;professor;A1;people
+student;;estudante;A1;people
+doctor;;médico;A1;people
+nurse;;enfermeiro;A1;people
+police;;polícia;A2;people
+manager;;gerente;B1;work
+colleague;;colega;B1;work
+customer;;cliente;B1;work
+home;;casa, lar;A1;place
+house;;casa;A1;place
+room;;quarto, cômodo;A1;place
+kitchen;;cozinha;A1;place
+bathroom;;banheiro;A1;place
+school;;escola;A1;place
+office;;escritório;A1;place
+hospital;;hospital;A1;place
+store;;loja;A1;place
+market;;mercado;A1;place
+bank;;banco;A1;place
+street;;rua;A1;place
+city;;cidade;A1;place
+country;;país;A1;place
+hotel;;hotel;A2;travel
+airport;;aeroporto;A2;travel
+station;;estação;A2;travel
+ticket;;bilhete, passagem;A2;travel
+passport;;passaporte;A2;travel
+luggage;;bagagem;A2;travel
+map;;mapa;A2;travel
+museum;;museu;A2;place
+restaurant;;restaurante;A2;place
+park;;parque;A2;place
+beach;;praia;A2;place
+bridge;;ponte;A2;place
+time;;tempo;A1;time
+day;;dia;A1;time
+week;;semana;A1;time
+month;;mês;A1;time
+year;;ano;A1;time
+morning;;manhã;A1;time
+afternoon;;tarde;A1;time
+evening;;noite, fim de tarde;A1;time
+night;;noite;A1;time
+today;;hoje;A1;time
+tomorrow;;amanhã;A1;time
+yesterday;;ontem;A1;time
+hour;;hora;A1;time
+minute;;minuto;A2;time
+water;;água;A1;food
+bread;;pão;A1;food
+rice;;arroz;A1;food
+meat;;carne;A1;food
+fish;;peixe;A1;food
+chicken;;frango;A1;food
+egg;;ovo;A1;food
+milk;;leite;A1;food
+cheese;;queijo;A1;food
+fruit;;fruta;A1;food
+apple;;maçã;A1;food
+banana;;banana;A1;food
+orange;;laranja;A1;food
+coffee;;café;A1;food
+tea;;chá;A1;food
+sugar;;açúcar;A1;food
+salt;;sal;A1;food
+pepper;;pimenta;A2;food
+breakfast;;café da manhã;A2;food
+lunch;;almoço;A2;food
+dinner;;jantar;A2;food
+phone;;telefone;A1;object
+computer;;computador;A1;object
+book;;livro;A1;object
+pen;;caneta;A1;object
+paper;;papel;A1;object
+table;;mesa;A1;object
+chair;;cadeira;A1;object
+bed;;cama;A1;object
+door;;porta;A1;object
+window;;janela;A1;object
+key;;chave;A1;object
+bag;;bolsa, mochila;A1;object
+money;;dinheiro;A1;money
+card;;cartão;A1;money
+clock;;relógio;A2;object
+camera;;câmera;A2;object
+problem;;problema;A2;general
+solution;;solução;A2;general
+question;;pergunta;A2;general
+idea;;ideia;A2;general
+message;;mensagem;A2;general
+email;;e-mail;A2;general
+meeting;;reunião;B1;work
+project;;projeto;B1;work
+deadline;;prazo;B1;work
+schedule;;agenda, cronograma;B1;work
+report;;relatório;B1;work
+task;;tarefa;B1;work
+goal;;meta, objetivo;B1;work
+budget;;orçamento;B1;money
+advice;;conselho;B1;general
+stress;;estresse;B1;health
+health;;saúde;B1;health
+research;;pesquisa;B2;academic
+context;;contexto;B2;academic
+evidence;;evidência, prova;B2;academic
+strategy;;estratégia;B2;work
+impact;;impacto;B2;general
+policy;;política, diretriz;B2;work
+economy;;economia;B2;general
+culture;;cultura;B2;general
+behavior;;comportamento;B2;general
+priority;;prioridade;B2;work
+resource;;recurso;B2;work
+requirement;;requisito;B2;work
+challenge;;desafio;B2;general
+opportunity;;oportunidade;B2;general
+outcome;;resultado;B2;general
+framework;;estrutura, arcabouço;C1;work
+compliance;;conformidade;C1;work
+sustainability;;sustentabilidade;C1;general
+innovation;;inovação;C1;general
+stakeholder;;parte interessada;C1;work
+transparency;;transparência;C1;general
+accountability;;responsabilização;C1;work
+constraint;;restrição;C1;work
+ambiguity;;ambiguidade;C1;general
+proficiency;;proficiência;C1;general
+methodology;;metodologia;C2;academic
+discrepancy;;discrepância;C2;general
+interdependence;;interdependência;C2;general
+conundrum;;enigma, dilema;C2;general
+hypothesis;;hipótese;C2;academic
+phenomenon;;fenômeno;C2;academic
+precedent;;precedente;C2;general
+implication;;implicação;C2;general
+contingency;;contingência;C2;general
+paradigm;;paradigma;C2;academic
+good;;bom;A1;adjective
+bad;;ruim;A1;adjective
+big;;grande;A1;adjective
+small;;pequeno;A1;adjective
+new;;novo;A1;adjective
+old;;velho;A1;adjective
+young;;jovem;A1;adjective
+hot;;quente;A1;adjective
+cold;;frio;A1;adjective
+fast;;rápido;A1;adjective
+slow;;lento;A1;adjective
+easy;;fácil;A1;adjective
+hard;;difícil;A1;adjective
+happy;;feliz;A1;adjective
+sad;;triste;A1;adjective
+tired;;cansado;A1;adjective
+hungry;;com fome;A1;adjective
+thirsty;;com sede;A1;adjective
+busy;;ocupado;A1;adjective
+free;;livre;A1;adjective
+right;;certo;A1;adjective
+wrong;;errado;A1;adjective
+clean;;limpo;A1;adjective
+dirty;;sujo;A1;adjective
+important;;importante;A2;adjective
+different;;diferente;A2;adjective
+same;;mesmo, igual;A2;adjective
+ready;;pronto;A2;adjective
+late;;atrasado;A2;adjective
+early;;cedo;A2;adjective
+safe;;seguro;A2;adjective
+dangerous;;perigoso;A2;adjective
+noisy;;barulhento;A2;adjective
+quiet;;silencioso;A2;adjective
+strong;;forte;A2;adjective
+weak;;fraco;A2;adjective
+beautiful;;bonito;A2;adjective
+ugly;;feio;A2;adjective
+interesting;;interessante;A2;adjective
+boring;;chato;A2;adjective
+expensive;;caro;A2;adjective
+cheap;;barato;A2;adjective
+popular;;popular;A2;adjective
+famous;;famoso;A2;adjective
+reliable;;confiável;B1;adjective
+useful;;útil;B1;adjective
+common;;comum;B1;adjective
+serious;;sério;B1;adjective
+patient;;paciente;B1;adjective
+confident;;confiante;B1;adjective
+nervous;;nervoso;B1;adjective
+honest;;honesto;B1;adjective
+private;;privado;B1;adjective
+public;;público;B1;adjective
+complex;;complexo;B2;adjective
+significant;;significativo;B2;adjective
+efficient;;eficiente;B2;adjective
+accurate;;preciso;B2;adjective
+relevant;;relevante;B2;adjective
+flexible;;flexível;B2;adjective
+realistic;;realista;B2;adjective
+critical;;crítico;B2;adjective
+essential;;essencial;B2;adjective
+global;;global;B2;adjective
+sophisticated;;sofisticado;C1;adjective
+nuanced;;cheio de nuances;C1;adjective
+substantial;;substancial;C1;adjective
+coherent;;coerente;C1;adjective
+pragmatic;;pragmático;C1;adjective
+inevitable;;inevitável;C1;adjective
+resilient;;resiliente;C1;adjective
+preliminary;;preliminar;C1;adjective
+robust;;robusto;C1;adjective
+concise;;conciso;C1;adjective
+unequivocal;;inequívoco;C2;adjective
+meticulous;;meticuloso;C2;adjective
+ubiquitous;;onipresente;C2;adjective
+intrinsic;;intrínseco;C2;adjective
+paramount;;primordial;C2;adjective
+unprecedented;;sem precedentes;C2;adjective
+multifaceted;;multifacetado;C2;adjective
+enigmatic;;enigmático;C2;adjective
+contentious;;controverso;C2;adjective
+consequential;;consequente, importante;C2;adjective
+black;;preto;A1;color
+white;;branco;A1;color
+red;;vermelho;A1;color
+blue;;azul;A1;color
+green;;verde;A1;color
+yellow;;amarelo;A1;color
+brown;;marrom;A1;color
+pink;;rosa;A1;color
+gray;;cinza;A1;color
+purple;;roxo;A1;color

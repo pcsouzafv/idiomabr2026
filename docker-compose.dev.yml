@@ -22,6 +22,16 @@ services:
     networks:
       - idiomasbr-network-dev
 
+  # Redis (session store)
+  redis:
+    image: redis:7-alpine
+    container_name: idiomasbr-redis-dev
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - idiomasbr-network-dev
+
   # FastAPI Backend (Development with hot-reload)
   backend:
     build:
@@ -34,11 +44,28 @@ services:
       SECRET_KEY: dev-secret-key-change-in-production
       ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: 10080
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_TTS_BASE_URL: ${OPENAI_TTS_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_TTS_MODEL: ${OPENAI_TTS_MODEL:-tts-1}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      CONVERSATION_AI_PROVIDER: ${CONVERSATION_AI_PROVIDER:-auto}
+      CONVERSATION_OPENAI_MODEL: ${CONVERSATION_OPENAI_MODEL:-gpt-4o-mini}
+      CONVERSATION_DEEPSEEK_MODEL: ${CONVERSATION_DEEPSEEK_MODEL:-deepseek-chat}
+      CONVERSATION_HISTORY_MESSAGES: ${CONVERSATION_HISTORY_MESSAGES:-10}
+      CONVERSATION_MAX_TOKENS: ${CONVERSATION_MAX_TOKENS:-700}
+      CONVERSATION_TEMPERATURE: ${CONVERSATION_TEMPERATURE:-0.7}
+      CONVERSATION_TIMEOUT_SECONDS: ${CONVERSATION_TIMEOUT_SECONDS:-30}
+      CONVERSATION_MAX_RETRIES: ${CONVERSATION_MAX_RETRIES:-1}
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-21600}
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
       - ./backend:/app
     networks:

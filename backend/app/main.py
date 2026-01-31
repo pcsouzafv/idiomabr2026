@@ -13,8 +13,11 @@ from app.models import gamification  # type: ignore[unused-import]  # noqa: F401
 from app.models import sentence  # type: ignore[unused-import]  # noqa: F401
 from app.models import conversation_lesson  # type: ignore[unused-import]  # noqa: F401
 
-# Criar tabelas
-Base.metadata.create_all(bind=engine)
+settings = get_settings()
+
+# Criar tabelas (apenas em desenvolvimento)
+if settings.environment.lower() != "production":
+    Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="IdiomasBR",
@@ -28,8 +31,6 @@ if os.path.isdir(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
 # CORS
-settings = get_settings()
-
 _default_origins = [
     "http://localhost:3000",
     "http://localhost:5173",

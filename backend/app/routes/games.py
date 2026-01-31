@@ -13,6 +13,7 @@ from datetime import datetime, timezone, timedelta
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.core.config import get_settings
 from app.models.user import User
 from app.models.word import Word
 from app.models.review import Review
@@ -20,6 +21,7 @@ from app.models.progress import UserProgress
 from app.models.gamification import UserStats, GameSession, Achievement, UserAchievement
 from app.models.sentence import Sentence
 from app.services.spaced_repetition import calculate_next_review
+from app.services.session_store import get_session_store
 from app.schemas.games import (
     QuizSessionResponse, QuizQuestion,
     QuizResultRequest, QuizResultResponse,
@@ -35,10 +37,31 @@ from app.schemas.games import (
 
 router = APIRouter(prefix="/api/games", tags=["games"])
 
-# Armazenamento temporário de sessões (em produção usar Redis)
-game_sessions = {}
+# Armazenamento temporario de sessoes (em producao usar Redis)
+session_store = get_session_store()
+SESSION_PREFIX = "games:"
+SESSION_TTL_SECONDS = int(get_settings().session_ttl_seconds or 0) or 6 * 60 * 60
 
-# XP por tipo de jogo
+
+def _session_key(session_id: str) -> str:
+    return f"{SESSION_PREFIX}{session_id}"
+
+
+def _get_session(session_id: str) -> Optional[dict]:
+    return session_store.get(_session_key(session_id))
+
+
+def _save_session(session_id: str, payload: dict) -> None:
+    session_store.set(_session_key(session_id), payload, ttl_seconds=SESSION_TTL_SECONDS)
+
+
+def _delete_session(session_id: str) -> None:
+    session_store.delete(_session_key(session_id))
+
+
+def _cleanup_sessions() -> None:
+    session_store.cleanup()
+
 XP_REWARDS = {
     "quiz": {"base": 5, "correct": 10, "perfect_bonus": 50},
     "hangman": {"win": 30, "letter": 2},
@@ -188,6 +211,7 @@ def start_quiz(
     current_user: User = Depends(get_current_user)
 ):
     """Inicia uma sessão de quiz de múltipla escolha."""
+    _cleanup_sessions()
     query = db.query(Word)
     
     if level:
@@ -223,14 +247,18 @@ def start_quiz(
             options=options
         ))
     
+    questions_payload = [q.model_dump() for q in questions]
     session_id = str(uuid.uuid4())
-    game_sessions[session_id] = {
-        "type": "quiz",
-        "user_id": current_user.id,
-        "questions": questions,
-        "created_at": datetime.now(timezone.utc)
-    }
-    
+    _save_session(
+        session_id,
+        {
+            "type": "quiz",
+            "user_id": current_user.id,
+            "questions": questions_payload,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
     return QuizSessionResponse(
         session_id=session_id,
         questions=questions,
@@ -245,15 +273,17 @@ def submit_quiz(
     current_user: User = Depends(get_current_user)
 ):
     """Submete respostas do quiz e calcula pontuação."""
+    _cleanup_sessions()
     session_id = request.session_id
-    if session_id not in game_sessions:
-        raise HTTPException(status_code=404, detail="Sessão não encontrada")
-    
-    session = game_sessions[session_id]
+    session = _get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Sessao nao encontrada")
+
     if session["user_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Sessão não pertence ao usuário")
-    
-    questions = session["questions"]
+        raise HTTPException(status_code=403, detail="Sessao nao pertence ao usuario")
+
+    questions_raw = session["questions"]
+    questions = [QuizQuestion(**q) if isinstance(q, dict) else q for q in questions_raw]
     
     correct = 0
     correct_words = []
@@ -318,7 +348,7 @@ def submit_quiz(
     new_achievements = check_achievements(db, current_user.id, stats)
     
     # Limpar sessão
-    del game_sessions[session_id]
+    _delete_session(session_id)
     
     return QuizResultResponse(
         score=correct,
@@ -345,6 +375,7 @@ def start_sentence_builder(
 
     Respeita o nível via `Sentence.level` e limita o tamanho da frase para ficar proporcional ao nível.
     """
+    _cleanup_sessions()
 
     chosen_level = (level or "A1").upper()
     max_tokens = _max_tokens_for_level(chosen_level)
@@ -416,12 +447,15 @@ def start_sentence_builder(
         )
 
     session_id = str(uuid.uuid4())
-    game_sessions[session_id] = {
-        "type": "sentence_builder",
-        "user_id": current_user.id,
-        "created_at": datetime.now(timezone.utc),
-        "correct": correct_map,
-    }
+    _save_session(
+        session_id,
+        {
+            "type": "sentence_builder",
+            "user_id": current_user.id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "correct": correct_map,
+        },
+    )
 
     return SentenceBuilderSessionResponse(session_id=session_id, items=items, total=len(items))
 
@@ -433,16 +467,17 @@ def submit_sentence_builder(
     current_user: User = Depends(get_current_user)
 ):
     """Submete uma sessão de montar frases e calcula pontuação."""
+    _cleanup_sessions()
 
     session_id = request.session_id
-    if session_id not in game_sessions:
-        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    session = _get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Sessao nao encontrada")
 
-    session = game_sessions[session_id]
     if session.get("user_id") != current_user.id:
-        raise HTTPException(status_code=403, detail="Sessão não pertence ao usuário")
+        raise HTTPException(status_code=403, detail="Sessao nao pertence ao usuario")
     if session.get("type") != "sentence_builder":
-        raise HTTPException(status_code=400, detail="Tipo de sessão inválido")
+        raise HTTPException(status_code=400, detail="Tipo de sessao invalido")
 
     correct_map = session.get("correct") or {}
 
@@ -500,7 +535,7 @@ def submit_sentence_builder(
     db.add(game_session)
     db.commit()
 
-    del game_sessions[session_id]
+    _delete_session(session_id)
 
     return SentenceBuilderSubmitResponse(
         score=score,
@@ -520,6 +555,7 @@ def start_hangman(
     current_user: User = Depends(get_current_user)
 ):
     """Inicia um novo jogo da forca."""
+    _cleanup_sessions()
     import re
 
     query = db.query(Word)
@@ -574,18 +610,21 @@ def start_hangman(
         masked = pattern.sub("_" * len(answer), text_clean)
         return masked
     
-    game_sessions[session_id] = {
-        "type": "hangman",
-        "user_id": current_user.id,
-        "word": english_clean.lower(),
-        "word_id": word.id,
-        "guessed": [],
-        "attempts_left": 6,
-        "hint": word.portuguese.strip(),
-        "ipa": word.ipa or "",
-        "created_at": datetime.now(timezone.utc)
-    }
-    
+    _save_session(
+        session_id,
+        {
+            "type": "hangman",
+            "user_id": current_user.id,
+            "word": english_clean.lower(),
+            "word_id": word.id,
+            "guessed": [],
+            "attempts_left": 6,
+            "hint": word.portuguese.strip(),
+            "ipa": word.ipa or "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
     display = " ".join(["_" for _ in english_clean])
     
     return HangmanState(
@@ -618,13 +657,14 @@ def guess_hangman(
     current_user: User = Depends(get_current_user)
 ):
     """Tenta adivinhar uma letra no jogo da forca."""
-    if session_id not in game_sessions:
-        raise HTTPException(status_code=404, detail="Sessão não encontrada")
-    
-    session = game_sessions[session_id]
+    _cleanup_sessions()
+    session = _get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Sessao nao encontrada")
+
     if session["user_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Sessão não pertence ao usuário")
-    
+        raise HTTPException(status_code=403, detail="Sessao nao pertence ao usuario")
+
     letter = request.letter.lower()
     if len(letter) != 1 or not letter.isalpha():
         raise HTTPException(status_code=400, detail="Envie apenas uma letra")
@@ -671,8 +711,11 @@ def guess_hangman(
         db.add(game_session)
         db.commit()
         
-        del game_sessions[session_id]
+        _delete_session(session_id)
     
+    if not game_over:
+        _save_session(session_id, session)
+
     return HangmanGuessResponse(
         correct=correct,
         display=display,
@@ -696,6 +739,7 @@ def start_matching(
     current_user: User = Depends(get_current_user)
 ):
     """Inicia um jogo de combinar palavras."""
+    _cleanup_sessions()
     def _norm(text: Optional[str]) -> str:
         if not text:
             return ""
@@ -859,14 +903,17 @@ def start_matching(
     random.shuffle(cards)
     
     session_id = str(uuid.uuid4())
-    game_sessions[session_id] = {
-        "type": "matching",
-        "user_id": current_user.id,
-        "pairs": num_pairs,
-        "words": {w.id: {"en": en, "pt": pt} for (w, en, pt) in picked},
-        "created_at": datetime.now(timezone.utc)
-    }
-    
+    _save_session(
+        session_id,
+        {
+            "type": "matching",
+            "user_id": current_user.id,
+            "pairs": num_pairs,
+            "words": {str(w.id): {"en": en, "pt": pt} for (w, en, pt) in picked},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
     return MatchingGameResponse(
         session_id=session_id,
         cards=cards,
@@ -884,13 +931,14 @@ def submit_matching(
     current_user: User = Depends(get_current_user)
 ):
     """Submete resultado do jogo de matching."""
-    if request.session_id not in game_sessions:
-        raise HTTPException(status_code=404, detail="Sessão não encontrada")
-    
-    session = game_sessions[request.session_id]
+    _cleanup_sessions()
+    session = _get_session(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Sessao nao encontrada")
+
     if session["user_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Sessão não pertence ao usuário")
-    
+        raise HTTPException(status_code=403, detail="Sessao nao pertence ao usuario")
+
     pairs = session["pairs"]
     
     # Calcular XP (baseado em tempo e movimentos)
@@ -912,7 +960,7 @@ def submit_matching(
 
     # Integra o Matching ao aprendizado: ao completar, registra revisão e atualiza agenda (spaced repetition)
     if request.completed:
-        word_ids = list(session.get("words", {}).keys())
+        word_ids = [int(w) for w in session.get("words", {}).keys()]
 
         # Heurística simples de dificuldade baseada em desempenho
         difficulty = "medium"
@@ -996,7 +1044,7 @@ def submit_matching(
     db.add(game_session)
     db.commit()
     
-    del game_sessions[request.session_id]
+    _delete_session(request.session_id)
     
     return MatchingResultResponse(
         score=pairs if request.completed else 0,
@@ -1017,6 +1065,7 @@ def start_dictation(
     current_user: User = Depends(get_current_user)
 ):
     """Inicia uma sessão de ditado."""
+    _cleanup_sessions()
     query = db.query(Word)
     
     if level:
@@ -1045,16 +1094,19 @@ def start_dictation(
             ipa=word.ipa or "",
             hint=word.portuguese.strip()  # Tradução como dica
         ))
-        word_map[word.id] = english_clean.lower()
+        word_map[str(word.id)] = english_clean.lower()
     
     session_id = str(uuid.uuid4())
-    game_sessions[session_id] = {
-        "type": "dictation",
-        "user_id": current_user.id,
-        "words": word_map,
-        "created_at": datetime.now(timezone.utc)
-    }
-    
+    _save_session(
+        session_id,
+        {
+            "type": "dictation",
+            "user_id": current_user.id,
+            "words": word_map,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
     return DictationSessionResponse(
         session_id=session_id,
         words=dictation_words,
@@ -1069,22 +1121,24 @@ def submit_dictation(
     current_user: User = Depends(get_current_user)
 ):
     """Submete respostas do ditado."""
+    _cleanup_sessions()
     session_id = request.session_id
-    if session_id not in game_sessions:
-        raise HTTPException(status_code=404, detail="Sessão não encontrada")
-    
-    session = game_sessions[session_id]
+    session = _get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Sessao nao encontrada")
+
     if session["user_id"] != current_user.id:
-        raise HTTPException(status_code=403, detail="Sessão não pertence ao usuário")
-    
+        raise HTTPException(status_code=403, detail="Sessao nao pertence ao usuario")
+
     word_map = session["words"]
     
     correct = 0
     results = []
     
     for answer in request.answers:
-        if answer.word_id in word_map:
-            correct_word = word_map[answer.word_id]
+        key = str(answer.word_id)
+        if key in word_map:
+            correct_word = word_map[key]
             is_correct = answer.answer.lower().strip() == correct_word
             
             if is_correct:
@@ -1127,7 +1181,7 @@ def submit_dictation(
     db.add(game_session)
     db.commit()
     
-    del game_sessions[session_id]
+    _delete_session(session_id)
     
     return DictationResultResponse(
         score=correct,

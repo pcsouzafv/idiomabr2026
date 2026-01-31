@@ -9,6 +9,7 @@ import re
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from app.core.config import get_settings
+from app.services.session_store import get_session_store
 
 try:
     # OpenAI Python SDK v1+
@@ -76,11 +77,34 @@ class ConversationAIService:
         self.history_messages = max(1, int(settings.conversation_history_messages))
         self.max_tokens = max(50, int(settings.conversation_max_tokens))
         self.temperature = float(settings.conversation_temperature)
-        
-        # Armazena conversações ativas em memória
-        # TODO: Migrar para database para persistência
-        self.active_conversations: Dict[str, Dict[str, Any]] = {}
+        self.store = get_session_store()
+        self._prefix = "conversation:"
+        ttl = int(getattr(settings, "session_ttl_seconds", 0) or 0)
+        self.session_ttl_seconds = ttl if ttl > 0 else 6 * 60 * 60
     
+    def _key(self, conversation_id: str) -> str:
+        return f"{self._prefix}{conversation_id}"
+
+    def get_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        return self.store.get(self._key(conversation_id))
+
+    def _save_conversation(self, conversation_id: str, conversation: Dict[str, Any]) -> None:
+        self.store.set(self._key(conversation_id), conversation, ttl_seconds=self.session_ttl_seconds)
+
+    def _delete_conversation(self, conversation_id: str) -> None:
+        self.store.delete(self._key(conversation_id))
+
+    @property
+    def active_conversations(self) -> Dict[str, Dict[str, Any]]:
+        conversations: Dict[str, Dict[str, Any]] = {}
+        for key in self.store.list_keys(self._prefix):
+            conversation = self.store.get(key)
+            if not isinstance(conversation, dict):
+                continue
+            conv_id = key[len(self._prefix) :]
+            conversations[conv_id] = conversation
+        return conversations
+
     def create_conversation(
         self,
         user_id: int,
@@ -119,7 +143,7 @@ class ConversationAIService:
             "lesson": None,
         }
         
-        self.active_conversations[conversation_id] = conversation
+        self._save_conversation(conversation_id, conversation)
         
         return {
             "conversation_id": conversation_id,
@@ -178,7 +202,7 @@ class ConversationAIService:
             },
         }
 
-        self.active_conversations[conversation_id] = conversation
+        self._save_conversation(conversation_id, conversation)
 
         return {
             "conversation_id": conversation_id,
@@ -264,10 +288,10 @@ class ConversationAIService:
             raise ValueError(f"Erro ao gerar perguntas: {str(e)}")
 
     def send_lesson_message(self, conversation_id: str, user_message: str) -> Dict[str, Any]:
-        if conversation_id not in self.active_conversations:
-            raise ValueError(f"Conversação {conversation_id} não encontrada")
+        conversation = self.get_conversation(conversation_id)
+        if not conversation:
+            raise ValueError(f"Conversa nao encontrada: {conversation_id}")
 
-        conversation = self.active_conversations[conversation_id]
         lesson = conversation.get("lesson")
         if not lesson or lesson.get("status") != "active":
             raise ValueError("Lição não ativa")
@@ -346,10 +370,13 @@ class ConversationAIService:
             "timestamp": datetime.utcnow().isoformat(),
         })
 
+
         if is_last:
             lesson["status"] = "ended"
         else:
             lesson["current_index"] = idx + 1
+
+        self._save_conversation(conversation_id, conversation)
 
         result = {
             "conversation_id": conversation_id,
@@ -381,10 +408,9 @@ class ConversationAIService:
         Returns:
             Resposta da IA com texto e áudio (opcional)
         """
-        if conversation_id not in self.active_conversations:
-            raise ValueError(f"Conversação {conversation_id} não encontrada")
-        
-        conversation = self.active_conversations[conversation_id]
+        conversation = self.get_conversation(conversation_id)
+        if not conversation:
+            raise ValueError(f"Conversa nao encontrada: {conversation_id}")
         
         # Adiciona mensagem do usuário
         conversation["messages"].append({
@@ -435,6 +461,8 @@ class ConversationAIService:
             "content": ai_response,
             "timestamp": datetime.utcnow().isoformat()
         })
+
+        self._save_conversation(conversation_id, conversation)
         
         result = {
             "conversation_id": conversation_id,
@@ -450,37 +478,38 @@ class ConversationAIService:
     
     def get_conversation_history(self, conversation_id: str) -> List[Dict[str, Any]]:
         """
-        Obtém histórico de mensagens de uma conversação
+        Obtem historico de mensagens de uma conversa
         
         Args:
-            conversation_id: ID da conversação
+            conversation_id: ID da conversa
         
         Returns:
             Lista de mensagens
         """
-        if conversation_id not in self.active_conversations:
-            raise ValueError(f"Conversação {conversation_id} não encontrada")
-        
-        return self.active_conversations[conversation_id]["messages"]
-    
+        conversation = self.get_conversation(conversation_id)
+        if not conversation:
+            raise ValueError(f"Conversa nao encontrada: {conversation_id}")
+        return conversation["messages"]
+
     def end_conversation(self, conversation_id: str) -> Dict[str, Any]:
         """
-        Encerra uma conversação
+        Encerra uma conversa
         
         Args:
-            conversation_id: ID da conversação
+            conversation_id: ID da conversa
         
         Returns:
-            Resumo da conversação encerrada
+            Resumo da conversa encerrada
         """
-        if conversation_id not in self.active_conversations:
-            raise ValueError(f"Conversação {conversation_id} não encontrada")
-        
-        conversation = self.active_conversations[conversation_id]
+        conversation = self.get_conversation(conversation_id)
+        if not conversation:
+            raise ValueError(f"Conversa nao encontrada: {conversation_id}")
+
         conversation["status"] = "ended"
         conversation["ended_at"] = datetime.utcnow().isoformat()
-        
-        # Mantém em memória por enquanto (pode ser removido após migrar para DB)
+        self._save_conversation(conversation_id, conversation)
+
+        # Mantem em memoria por enquanto (pode ser removido apos migrar para DB)
         summary = {
             "conversation_id": conversation_id,
             "status": "ended",
@@ -488,13 +517,13 @@ class ConversationAIService:
             "ended_at": conversation["ended_at"],
             "message_count": len(conversation["messages"]),
             "duration_seconds": (
-                datetime.fromisoformat(conversation["ended_at"]) -
-                datetime.fromisoformat(conversation["created_at"])
-            ).total_seconds()
+                datetime.fromisoformat(conversation["ended_at"])
+                - datetime.fromisoformat(conversation["created_at"])
+            ).total_seconds(),
         }
-        
+
         return summary
-    
+
     def list_active_conversations(self, user_id: int) -> List[Dict[str, Any]]:
         """
         Lista conversações ativas de um usuário

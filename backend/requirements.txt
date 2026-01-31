@@ -16,3 +16,4 @@ requests==2.32.3
 # AI/ML dependencies
 openai==1.54.3
 # PyMuPDF==1.23.7  # Comentado - requer Visual Studio Build Tools no Windows
+redis==5.0.4

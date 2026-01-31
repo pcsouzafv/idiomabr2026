@@ -9,6 +9,8 @@ Aplicação web para aprendizado de inglês com flashcards e repetição espaça
 - ✅ **Pronúncia** - Transcrição fonética (IPA) + Text-to-Speech
 - ✅ **Gamificação** - Streaks diários, metas e progresso
 - ✅ **Estudo Bidirecional** - Inglês→Português e Português→Inglês
+- ✅ **🎙️ Conversação com IA** - Pratique inglês com conversação full-time usando ElevenLabs
+- ✅ **Text-to-Speech Avançado** - Áudio natural e realista com múltiplas vozes
 
 ## 📁 Estrutura do Projeto
 
@@ -143,6 +145,17 @@ O frontend estará disponível em: http://localhost:3000
 - `POST /api/study/review` - Registrar revisão
 - `GET /api/study/stats` - Estatísticas de progresso
 - `GET /api/study/history` - Histórico de estudo
+
+### 🎙️ Conversação (ElevenLabs)
+- `POST /api/conversation/tts` - Text-to-Speech
+- `GET /api/conversation/voices` - Listar vozes disponíveis
+- `POST /api/conversation/start` - Iniciar conversação com IA
+- `POST /api/conversation/{id}/message` - Enviar mensagem
+- `GET /api/conversation/{id}/history` - Histórico da conversa
+- `POST /api/conversation/{id}/end` - Encerrar conversação
+
+**📚 Guia Completo**: [CONVERSATION_MODULE_GUIDE.md](./CONVERSATION_MODULE_GUIDE.md)  
+**⚡ Quick Start**: [CONVERSATION_QUICK_START.md](./CONVERSATION_QUICK_START.md)
 
 ## 🧠 Algoritmo de Repetição Espaçada
 

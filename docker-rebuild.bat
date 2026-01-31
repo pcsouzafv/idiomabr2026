@@ -14,20 +14,42 @@ echo.
 set /p confirm="Deseja continuar? (S/N): "
 if /i not "%confirm%"=="S" goto end
 
+REM Seleciona o comando do Compose (prefere v2: "docker compose" / fallback v1: "docker-compose")
+set "COMPOSE_CMD="
+docker compose version >nul 2>&1
+if %errorlevel%==0 (
+    set "COMPOSE_CMD=docker compose"
+) else (
+    where docker-compose >nul 2>&1
+    if %errorlevel%==0 (
+        set "COMPOSE_CMD=docker-compose"
+    )
+)
+
+if "%COMPOSE_CMD%"=="" (
+    echo ERRO: Nao foi encontrado "docker compose" nem "docker-compose".
+    pause
+    exit /b 1
+)
+
 echo.
 echo [1/6] Parando containers...
-docker-compose down
+call %COMPOSE_CMD% down
 if %errorlevel% neq 0 (
     echo AVISO: Containers podem nao estar rodando
 )
 echo.
 
-echo [2/6] Removendo imagens antigas...
-docker-compose rm -f
+echo [2/6] Removendo containers antigos...
+call %COMPOSE_CMD% rm -f
+echo.
+
+echo [2.5/6] Baixando imagens (services com image: ...)...
+call %COMPOSE_CMD% pull
 echo.
 
 echo [3/6] Rebuild das imagens (pode demorar alguns minutos)...
-docker-compose build --no-cache
+call %COMPOSE_CMD% build --no-cache --pull
 if %errorlevel% neq 0 (
     echo ERRO: Falha ao fazer build das imagens
     pause
@@ -36,7 +58,7 @@ if %errorlevel% neq 0 (
 echo.
 
 echo [4/6] Iniciando containers...
-docker-compose up -d
+call %COMPOSE_CMD% up -d
 if %errorlevel% neq 0 (
     echo ERRO: Falha ao iniciar containers
     pause
@@ -50,7 +72,7 @@ echo.
 
 echo [6/6] Aplicando migracoes do banco de dados...
 docker cp backend\migrations\add_word_details.sql idiomasbr-postgres:/tmp/
-docker-compose exec -T postgres psql -U idiomasbr -d idiomasbr -f /tmp/add_word_details.sql
+call %COMPOSE_CMD% exec -T postgres psql -U idiomasbr -d idiomasbr -f /tmp/add_word_details.sql
 if %errorlevel% neq 0 (
     echo AVISO: Migracoes podem ja estar aplicadas
 )
@@ -61,7 +83,7 @@ echo  REBUILD CONCLUIDO!
 echo ========================================
 echo.
 echo Containers rodando:
-docker-compose ps
+call %COMPOSE_CMD% ps
 echo.
 echo URLs de acesso:
 echo - Frontend: http://localhost:3000

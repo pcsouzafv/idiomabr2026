@@ -36,20 +36,23 @@ Este script:
 
 ```bash
 # 1. Parar containers
-docker-compose down
+docker compose down
 
-# 2. Rebuild (força rebuild sem cache)
-docker-compose build --no-cache
+# 2. Baixar imagens (services com image: ...)
+docker compose pull
 
-# 3. Iniciar novamente
-docker-compose up -d
+# 3. Rebuild (força rebuild sem cache e atualiza base images)
+docker compose build --no-cache --pull
+
+# 4. Iniciar novamente
+docker compose up -d
 
 # 4. Aguardar banco inicializar
 timeout /t 15
 
 # 5. Aplicar migrações
 docker cp backend\migrations\add_word_details.sql idiomasbr-postgres:/tmp/
-docker-compose exec postgres psql -U idiomasbr -d idiomasbr -f /tmp/add_word_details.sql
+docker compose exec postgres psql -U idiomasbr -d idiomasbr -f /tmp/add_word_details.sql
 ```
 
 ---
@@ -58,7 +61,7 @@ docker-compose exec postgres psql -U idiomasbr -d idiomasbr -f /tmp/add_word_det
 
 ### Containers rodando
 ```bash
-docker-compose ps
+docker compose ps
 ```
 
 **Deve mostrar:**
@@ -76,7 +79,7 @@ curl http://localhost:8000/docs
 
 ### Banco de dados com novos campos
 ```bash
-docker-compose exec postgres psql -U idiomasbr -d idiomasbr -c "\d words"
+docker compose exec postgres psql -U idiomasbr -d idiomasbr -c "\d words"
 ```
 
 **Deve listar os novos campos:**
@@ -164,10 +167,10 @@ docker volume inspect idiomasbr_postgres_data
 ### Backup do banco
 ```bash
 # Exportar
-docker-compose exec postgres pg_dump -U idiomasbr idiomasbr > backup.sql
+docker compose exec postgres pg_dump -U idiomasbr idiomasbr > backup.sql
 
 # Importar
-docker-compose exec -T postgres psql -U idiomasbr -d idiomasbr < backup.sql
+docker compose exec -T postgres psql -U idiomasbr -d idiomasbr < backup.sql
 ```
 
 ---
@@ -176,28 +179,28 @@ docker-compose exec -T postgres psql -U idiomasbr -d idiomasbr < backup.sql
 
 ### Ver logs em tempo real
 ```bash
-docker-compose logs -f
-docker-compose logs -f backend
-docker-compose logs -f postgres
+docker compose logs -f
+docker compose logs -f backend
+docker compose logs -f postgres
 ```
 
 ### Reiniciar apenas um serviço
 ```bash
-docker-compose restart backend
-docker-compose restart postgres
-docker-compose restart frontend
+docker compose restart backend
+docker compose restart postgres
+docker compose restart frontend
 ```
 
 ### Entrar no container
 ```bash
 # Backend
-docker-compose exec backend bash
+docker compose exec backend bash
 
 # PostgreSQL
-docker-compose exec postgres psql -U idiomasbr -d idiomasbr
+docker compose exec postgres psql -U idiomasbr -d idiomasbr
 
 # Frontend
-docker-compose exec frontend sh
+docker compose exec frontend sh
 ```
 
 ### Ver uso de recursos
@@ -208,10 +211,10 @@ docker stats
 ### Limpar tudo (CUIDADO!)
 ```bash
 # Remove containers, networks, volumes
-docker-compose down -v
+docker compose down -v
 
 # Remove imagens também
-docker-compose down -v --rmi all
+docker compose down -v --rmi all
 ```
 
 ---
