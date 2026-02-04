@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -10,32 +9,35 @@ import {
   XCircle,
   RefreshCw,
   Zap,
-  Clock,
   Sparkles,
   Trash2,
   Undo2,
+  PenTool,
   Volume2,
 } from 'lucide-react';
 import { conversationApi, gamesApi } from '@/lib/api';
 import { resolveMediaUrl } from '@/lib/media';
 
-interface SentenceBuilderItem {
+interface GrammarBuilderItem {
   item_id: string;
-  word_id: number;
-  focus_word: string;
-  sentence_en: string;
   sentence_pt: string;
   tokens: string[];
+  verb: string;
+  tip: string;
+  explanation: string;
+  level: number;
+  tense: string;
+  expected: string;
   audio_url?: string | null;
 }
 
-interface SentenceBuilderSession {
+interface GrammarBuilderSession {
   session_id: string;
-  items: SentenceBuilderItem[];
+  items: GrammarBuilderItem[];
   total: number;
 }
 
-interface SentenceBuilderResult {
+interface GrammarBuilderResult {
   score: number;
   total: number;
   percentage: number;
@@ -45,14 +47,33 @@ interface SentenceBuilderResult {
     correct: boolean;
     expected: string;
     your_answer: string;
+    expected_tokens: string[];
+    tip: string;
+    explanation: string;
+    verb: string;
+    level?: number;
+    tense?: string;
   }>;
 }
 
-export default function SentenceBuilderPage() {
-  const searchParams = useSearchParams();
-  const level = searchParams.get('level') || undefined;
+const tenseLabels: Record<string, string> = {
+  present: 'Presente',
+  past: 'Passado',
+  future: 'Futuro',
+};
 
-  const [session, setSession] = useState<SentenceBuilderSession | null>(null);
+export default function GrammarBuilderPage() {
+  const searchParams = useSearchParams();
+  const initialTense = (searchParams.get('tense') || '').toLowerCase();
+  const initialLevel = searchParams.get('level');
+  const initialLevelNumber = initialLevel ? Number(initialLevel) : NaN;
+
+  const [selectedTense, setSelectedTense] = useState<string>(initialTense);
+  const [selectedLevel, setSelectedLevel] = useState<number | null>(
+    Number.isFinite(initialLevelNumber) ? initialLevelNumber : null
+  );
+
+  const [session, setSession] = useState<GrammarBuilderSession | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [bankTokens, setBankTokens] = useState<string[]>([]);
   const [builtTokens, setBuiltTokens] = useState<string[]>([]);
@@ -60,7 +81,7 @@ export default function SentenceBuilderPage() {
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<SentenceBuilderResult | null>(null);
+  const [result, setResult] = useState<GrammarBuilderResult | null>(null);
 
   const [feedback, setFeedback] = useState<'correct' | 'wrong' | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -91,18 +112,19 @@ export default function SentenceBuilderPage() {
       setBankTokens([]);
       startedAtRef.current = Date.now();
 
-      const res = await gamesApi.startSentenceBuilder({
-        level,
-        num_sentences: 5,
+      const res = await gamesApi.startGrammarBuilder({
+        num_sentences: 6,
+        tense: selectedTense || undefined,
+        level: selectedLevel ?? undefined,
       });
-      const data: SentenceBuilderSession = res.data;
+      const data: GrammarBuilderSession = res.data;
       setSession(data);
 
       const first = data.items[0];
       setBankTokens(first?.tokens || []);
       setBuiltTokens([]);
     } catch (e) {
-      console.error('Erro ao iniciar Montar Frases:', e);
+      console.error('Erro ao iniciar Gramática:', e);
       setSession(null);
     } finally {
       setLoading(false);
@@ -112,7 +134,7 @@ export default function SentenceBuilderPage() {
   useEffect(() => {
     loadSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level]);
+  }, [selectedTense, selectedLevel]);
 
   useEffect(() => {
     if (!session) return;
@@ -149,22 +171,18 @@ export default function SentenceBuilderPage() {
 
     const itemId = currentItem.item_id;
 
-    // Persist answer
     setAnswers((prev) => ({
       ...prev,
       [itemId]: builtTokens,
     }));
 
-    // Local quick-check (length only) to give immediate feedback.
-    // Final correctness comes from backend on submit.
     if (builtTokens.length === currentItem.tokens.length) {
       setFeedback('correct');
     } else {
       setFeedback('wrong');
     }
 
-    // Move on
-    const isLast = currentIndex >= (session.total - 1);
+    const isLast = currentIndex >= session.total - 1;
     if (!isLast) {
       setTimeout(() => {
         setCurrentIndex((i) => i + 1);
@@ -172,7 +190,6 @@ export default function SentenceBuilderPage() {
       return;
     }
 
-    // Submit all
     try {
       setSubmitting(true);
       const timeSpent = Math.max(0, Math.floor((Date.now() - startedAtRef.current) / 1000));
@@ -182,14 +199,14 @@ export default function SentenceBuilderPage() {
         tokens: answers[it.item_id] || (it.item_id === itemId ? builtTokens : []),
       }));
 
-      const res = await gamesApi.submitSentenceBuilder({
+      const res = await gamesApi.submitGrammarBuilder({
         session_id: session.session_id,
         answers: payloadAnswers,
         time_spent: timeSpent,
       });
       setResult(res.data);
     } catch (e) {
-      console.error('Erro ao enviar Montar Frases:', e);
+      console.error('Erro ao enviar Gramática:', e);
     } finally {
       setSubmitting(false);
     }
@@ -213,25 +230,25 @@ export default function SentenceBuilderPage() {
     }
   };
 
-  const playSentenceAudio = async () => {
-    if (!currentItem) return;
+  const playSentenceAudio = async (item: GrammarBuilderItem) => {
+    if (!item) return;
     try {
       setIsPlayingAudio(true);
       cleanupCurrentAudioUrl();
 
-      if (currentItem.audio_url && audioRef.current) {
-        const resolvedAudio = resolveMediaUrl(currentItem.audio_url);
+      if (item.audio_url && audioRef.current) {
+        const resolvedAudio = resolveMediaUrl(item.audio_url);
         if (resolvedAudio) {
           audioRef.current.src = resolvedAudio;
         } else {
-          audioRef.current.src = currentItem.audio_url;
+          audioRef.current.src = item.audio_url;
         }
         await audioRef.current.play();
         return;
       }
 
       const response = await conversationApi.textToSpeech({
-        text: currentItem.sentence_en || currentItem.tokens.join(' '),
+        text: item.expected,
       });
       const audioBlob = new Blob([response.data], { type: 'audio/mpeg' });
       const audioUrl = URL.createObjectURL(audioBlob);
@@ -256,8 +273,8 @@ export default function SentenceBuilderPage() {
               <ArrowLeft className="w-6 h-6" />
             </Link>
             <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-              <Sparkles className="w-7 h-7 text-yellow-400" />
-              Montar Frases
+              <PenTool className="w-7 h-7 text-yellow-400" />
+              Gramática
             </h1>
           </div>
           <button
@@ -271,6 +288,46 @@ export default function SentenceBuilderPage() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-8">
+        <div className="bg-gray-800/40 border border-gray-700 rounded-xl p-4 mb-6">
+          <div className="flex flex-wrap gap-4 items-center">
+            <div className="flex items-center gap-2 text-gray-300">
+              <Sparkles className="w-4 h-4 text-yellow-400" />
+              Filtros
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="grammar-tense" className="text-sm text-gray-400">Tempo verbal</label>
+              <select
+                id="grammar-tense"
+                value={selectedTense}
+                onChange={(e) => setSelectedTense(e.target.value)}
+                className="bg-gray-900 border border-gray-700 text-gray-200 rounded-lg px-3 py-2"
+              >
+                <option value="">Todos</option>
+                <option value="present">Presente</option>
+                <option value="past">Passado</option>
+                <option value="future">Futuro</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="grammar-level" className="text-sm text-gray-400">Nível</label>
+              <select
+                id="grammar-level"
+                value={selectedLevel ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSelectedLevel(v ? Number(v) : null);
+                }}
+                className="bg-gray-900 border border-gray-700 text-gray-200 rounded-lg px-3 py-2"
+              >
+                <option value="">Todos</option>
+                <option value="1">Nível 1</option>
+                <option value="2">Nível 2</option>
+                <option value="3">Nível 3</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
         {loading ? (
           <div className="text-gray-300">Carregando…</div>
         ) : !session || !currentItem ? (
@@ -314,136 +371,124 @@ export default function SentenceBuilderPage() {
                         <div className="mt-1">{r.expected}</div>
                       </>
                     )}
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-gray-400">
+                      <div>Verbo: <span className="text-gray-200">{r.verb || '-'}</span></div>
+                      <div>Tempo: <span className="text-gray-200">{tenseLabels[r.tense || ''] || '-'}</span></div>
+                      <div>Nível: <span className="text-gray-200">{r.level ?? '-'}</span></div>
+                      <div>Dica: <span className="text-gray-200">{r.tip || '-'}</span></div>
+                    </div>
+                    {r.explanation && (
+                      <div className="mt-2 text-xs text-gray-300">
+                        <span className="text-gray-400">Explicação:</span> {r.explanation}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           </div>
         ) : (
-          <>
-            <div className="flex items-center justify-between mb-4">
-              <div className="text-gray-300 flex items-center gap-3">
-                <div className="px-3 py-1 rounded-full bg-gray-800/70 border border-gray-700 text-sm">
-                  {progressLabel}
-                </div>
-                {level && (
-                  <div className="px-3 py-1 rounded-full bg-indigo-500/15 border border-indigo-500/20 text-indigo-300 text-sm">
-                    Nível {level}
-                  </div>
-                )}
-              </div>
-              <div className="text-gray-400 text-sm flex items-center gap-2">
-                <Clock className="w-4 h-4" />
-                Monte a frase usando as peças
-              </div>
-            </div>
-
-            <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-6">
-              <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="space-y-4">
+            <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-6 text-gray-200">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
-                  <div className="text-gray-300 text-sm">Dica (PT):</div>
-                  <div className="text-white text-lg mt-1">{currentItem.sentence_pt || '—'}</div>
-                  <div className="text-gray-400 text-sm mt-3">
-                    Palavra foco: <span className="text-yellow-300 font-semibold">{currentItem.focus_word}</span>
+                  <div className="text-sm text-gray-400">Frase em português</div>
+                  <div className="text-xl font-semibold text-white mt-1">{currentItem.sentence_pt}</div>
+                  <div className="mt-2 text-sm text-gray-400">
+                    Verbo: <span className="text-gray-200 font-medium">{currentItem.verb}</span>
+                  </div>
+                  <div className="mt-1 text-sm text-gray-400">
+                    Tempo: <span className="text-gray-200 font-medium">{tenseLabels[currentItem.tense] || currentItem.tense}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
+                  <div className="text-sm text-gray-400">Progresso: {progressLabel}</div>
                   <button
-                    onClick={playSentenceAudio}
+                    onClick={() => playSentenceAudio(currentItem)}
                     disabled={isPlayingAudio}
-                    className="px-3 py-2 rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600 transition flex items-center gap-2 disabled:opacity-60"
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600 disabled:opacity-60"
                     title="Ouvir a frase"
                   >
                     <Volume2 className="w-4 h-4" />
                     Ouvir
                   </button>
+                </div>
+              </div>
+
+              <div className="mt-4 text-sm text-gray-300 bg-gray-900/50 border border-gray-700 rounded-lg p-3">
+                <div className="text-gray-400 mb-1">Dica</div>
+                {currentItem.tip}
+              </div>
+              {currentItem.explanation && (
+                <div className="mt-3 text-sm text-gray-300 bg-gray-900/50 border border-gray-700 rounded-lg p-3">
+                  <div className="text-gray-400 mb-1">Explicação</div>
+                  {currentItem.explanation}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-6 text-gray-200">
+              <div className="text-sm text-gray-400">Construa a frase em inglês</div>
+              <div className="mt-3 min-h-[52px] rounded-lg border border-gray-700 bg-gray-900/50 px-3 py-2 text-white">
+                {currentBuiltText || <span className="text-gray-500">Clique nas peças abaixo</span>}
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {bankTokens.map((token, idx) => (
                   <button
-                    onClick={undoLast}
-                    className="px-3 py-2 rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600 transition flex items-center gap-2"
-                    disabled={builtTokens.length === 0}
+                    key={`${token}-${idx}`}
+                    onClick={() => onPickToken(token, idx)}
+                    className="px-3 py-1.5 rounded-full bg-gray-700 hover:bg-gray-600 text-white text-sm"
                   >
-                    <Undo2 className="w-4 h-4" />
-                    Desfazer
+                    {token}
                   </button>
-                  <button
-                    onClick={clearBuilt}
-                    className="px-3 py-2 rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600 transition flex items-center gap-2"
-                    disabled={builtTokens.length === 0}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    Limpar
-                  </button>
-                </div>
+                ))}
               </div>
 
-              <div className="mt-6">
-                <div className="text-gray-300 text-sm mb-2">Sua frase:</div>
-                <div className="min-h-[56px] bg-gray-900/40 border border-gray-700 rounded-lg p-3 text-white">
-                  {currentBuiltText || <span className="text-gray-500">Clique nas palavras abaixo para montar…</span>}
-                </div>
-              </div>
+              <div className="mt-4 flex items-center gap-2">
+                <button
+                  onClick={undoLast}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600"
+                >
+                  <Undo2 className="w-4 h-4" />
+                  Desfazer
+                </button>
+                <button
+                  onClick={clearBuilt}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Limpar
+                </button>
 
-              <div className="mt-6">
-                <div className="text-gray-300 text-sm mb-3">Banco de palavras:</div>
-                <div className="flex flex-wrap gap-2">
-                  {bankTokens.map((t, idx) => (
-                    <button
-                      key={`${t}-${idx}`}
-                      onClick={() => onPickToken(t, idx)}
-                      className="px-3 py-2 rounded-lg bg-gray-700 text-gray-100 hover:bg-gray-600 transition"
-                    >
-                      {t}
-                    </button>
-                  ))}
-                  {bankTokens.length === 0 && (
-                    <div className="text-gray-500 text-sm">Sem peças restantes</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-6 flex items-center justify-between gap-3 flex-wrap">
-                <div className="text-sm text-gray-400">Monte a frase e avance.</div>
+                <div className="flex-1" />
 
                 <button
                   onClick={checkAndNext}
                   disabled={submitting}
-                  className="px-5 py-3 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-500 transition disabled:opacity-60"
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-60"
                 >
-                  {currentIndex >= (session.total - 1) ? (submitting ? 'Enviando…' : 'Finalizar') : 'Próxima'}
+                  {currentIndex >= (session.total - 1) ? 'Finalizar' : 'Continuar'}
                 </button>
               </div>
 
-              <AnimatePresence>
-                {feedback && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 8 }}
-                    className="mt-4"
-                  >
-                    <div
-                      className={`rounded-lg px-4 py-3 border flex items-center gap-2 ${
-                        feedback === 'correct'
-                          ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
-                          : 'bg-rose-500/10 border-rose-500/20 text-rose-300'
-                      }`}
-                    >
-                      {feedback === 'correct' ? (
-                        <CheckCircle className="w-5 h-5" />
-                      ) : (
-                        <XCircle className="w-5 h-5" />
-                      )}
-                      <span className="text-sm">
-                        {feedback === 'correct'
-                          ? 'Ok! Próxima frase…'
-                          : 'Continue ajustando (você pode mostrar a resposta).'}
-                      </span>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              {feedback && (
+                <div className="mt-3 text-sm">
+                  {feedback === 'correct' ? (
+                    <span className="text-emerald-300 flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4" />
+                      Resposta registrada
+                    </span>
+                  ) : (
+                    <span className="text-rose-300 flex items-center gap-2">
+                      <XCircle className="w-4 h-4" />
+                      Ainda falta ajustar
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
-          </>
+          </div>
         )}
       </main>
 

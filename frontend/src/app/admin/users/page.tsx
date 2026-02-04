@@ -28,6 +28,10 @@ interface CreateUserPayload {
   daily_goal?: number;
 }
 
+interface UserEditPayload extends Partial<User> {
+  password?: string;
+}
+
 export default function AdminUsersPage() {
   const router = useRouter();
   const { user, token } = useAuthStore();
@@ -124,7 +128,7 @@ export default function AdminUsersPage() {
     }
   };
 
-  const handleSaveUser = async (userData: Partial<User>) => {
+  const handleSaveUser = async (userData: UserEditPayload) => {
     try {
       await axios.patch(
         `${process.env.NEXT_PUBLIC_API_URL}/api/admin/users/${editingUser?.id}`,
@@ -485,19 +489,24 @@ function UserCreateModal({
   );
 }
 
-function UserEditModal({ user, onClose, onSave }: { user: User; onClose: () => void; onSave: (user: Partial<User>) => void; }) {
-  const [formData, setFormData] = useState<Partial<User>>({
+function UserEditModal({ user, onClose, onSave }: { user: User; onClose: () => void; onSave: (user: UserEditPayload) => void; }) {
+  const [formData, setFormData] = useState<UserEditPayload>({
     name: user.name,
     email: user.email,
     phone_number: user.phone_number ?? '',
     daily_goal: user.daily_goal,
     is_active: user.is_active,
     is_admin: user.is_admin,
+    password: '',
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(formData);
+    const payload = { ...formData };
+    if (!payload.password) {
+      delete payload.password;
+    }
+    onSave(payload);
   };
 
   return (
@@ -579,6 +588,18 @@ function UserEditModal({ user, onClose, onSave }: { user: User; onClose: () => v
                 />
                 <span className="text-sm font-semibold text-gray-700">Admin</span>
               </label>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Nova Senha (opcional)</label>
+              <input
+                type="password"
+                value={formData.password ?? ''}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                title="Nova Senha"
+                placeholder="Minimo 6 caracteres"
+                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
             </div>
 
             <div className="bg-gray-50 rounded-lg p-4 mt-6">

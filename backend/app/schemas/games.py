@@ -251,8 +251,10 @@ class SentenceBuilderItem(BaseModel):
     item_id: str
     word_id: int
     focus_word: str
+    sentence_en: str
     sentence_pt: str
     tokens: List[str]
+    audio_url: Optional[str] = None
 
 
 class SentenceBuilderSessionResponse(BaseModel):
@@ -273,6 +275,46 @@ class SentenceBuilderSubmitRequest(BaseModel):
 
 
 class SentenceBuilderSubmitResponse(BaseModel):
+    score: int
+    total: int
+    percentage: float
+    xp_earned: int
+    results: List[dict]
+
+
+# ============== Gramática (Grammar Builder) ==============
+
+class GrammarBuilderItem(BaseModel):
+    item_id: str
+    sentence_pt: str
+    tokens: List[str]
+    verb: str
+    tip: str
+    explanation: str
+    level: int
+    tense: str
+    expected: str
+    audio_url: Optional[str] = None
+
+
+class GrammarBuilderSessionResponse(BaseModel):
+    session_id: str
+    items: List[GrammarBuilderItem]
+    total: int
+
+
+class GrammarBuilderAnswer(BaseModel):
+    item_id: str
+    tokens: List[str]
+
+
+class GrammarBuilderSubmitRequest(BaseModel):
+    session_id: str
+    answers: List[GrammarBuilderAnswer]
+    time_spent: int = 0
+
+
+class GrammarBuilderSubmitResponse(BaseModel):
     score: int
     total: int
     percentage: float

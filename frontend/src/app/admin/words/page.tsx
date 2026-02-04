@@ -17,6 +17,11 @@ interface Word {
   definition_pt?: string;
   example_en?: string;
   example_pt?: string;
+  synonyms?: string;
+  antonyms?: string;
+  collocations?: string;
+  usage_notes?: string;
+  audio_url?: string;
   tags?: string;
 }
 
@@ -366,6 +371,7 @@ house,haʊs,casa,A1,noun,A building for living,Um edifício para morar,This is m
       {showModal && (
         <WordModal
           word={editingWord}
+          token={token!}
           onClose={() => {
             setShowModal(false);
             setEditingWord(null);
@@ -380,10 +386,12 @@ house,haʊs,casa,A1,noun,A building for living,Um edifício para morar,This is m
 // ============== MODAL DE EDIÇÃO ==============
 function WordModal({
   word,
+  token,
   onClose,
   onSave,
 }: {
   word: Word | null;
+  token: string;
   onClose: () => void;
   onSave: (word: Partial<Word>) => void;
 }) {
@@ -394,10 +402,41 @@ function WordModal({
       level: "A1",
     }
   );
+  const [isFillingAi, setIsFillingAi] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSave(formData);
+  };
+
+  const handleAiFill = async () => {
+    if (!word?.id) return;
+    try {
+      setIsFillingAi(true);
+      const response = await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/admin/words/${word.id}/ai-fill`,
+        {
+          fields: [
+            "word_type",
+            "definition_en",
+            "definition_pt",
+            "example_en",
+            "example_pt",
+            "ipa",
+            "synonyms",
+            "antonyms",
+          ],
+          overwrite: false,
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setFormData(response.data);
+      toast.success("IA preencheu os campos faltantes!");
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || "Erro ao preencher com IA");
+    } finally {
+      setIsFillingAi(false);
+    }
   };
 
   return (
@@ -409,6 +448,20 @@ function WordModal({
           </h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm text-gray-500">
+                Use a IA para completar campos vazios desta palavra.
+              </div>
+              <button
+                type="button"
+                onClick={handleAiFill}
+                disabled={!word?.id || isFillingAi}
+                className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                title={word?.id ? "Preencher com IA" : "Salve a palavra antes de usar a IA"}
+              >
+                {isFillingAi ? "Preenchendo..." : "✨ Preencher com IA"}
+              </button>
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">

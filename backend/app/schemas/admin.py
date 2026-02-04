@@ -18,6 +18,32 @@ class AdminStats(BaseModel):
     words_by_level: Dict[str, int]
 
 
+class AdminPerformanceOverview(BaseModel):
+    total_users: int
+    active_users: int
+    total_reviews: int
+    total_unique_words: int
+    accuracy_percent: float
+    reviews_per_active_user: float
+
+
+class AdminUserPerformance(BaseModel):
+    user_id: int
+    name: str
+    email: EmailStr
+    last_study_date: Optional[datetime]
+    current_streak: int
+    total_reviews: int
+    unique_words: int
+    accuracy_percent: float
+
+
+class AdminPerformanceReport(BaseModel):
+    period_days: int
+    overview: AdminPerformanceOverview
+    users: List[AdminUserPerformance]
+
+
 # ============== USUÁRIOS ==============
 
 class UserResponse(BaseModel):
@@ -44,6 +70,7 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     is_admin: Optional[bool] = None
     daily_goal: Optional[int] = None
+    password: Optional[str] = None
 
 
 class UserCreateAdmin(BaseModel):
@@ -115,6 +142,11 @@ class WordUpdate(BaseModel):
     collocations: Optional[str] = None
     tags: Optional[str] = None
     audio_url: Optional[str] = None
+
+
+class WordAIFillRequest(BaseModel):
+    fields: Optional[List[str]] = None
+    overwrite: bool = False
 
 
 # ============== SENTENÇAS ==============

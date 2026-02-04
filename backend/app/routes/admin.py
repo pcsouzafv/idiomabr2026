@@ -5,13 +5,13 @@ Requer autenticação como admin (is_admin=True)
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Response
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, and_, Integer, cast
 from datetime import datetime, timezone, timedelta
 import os
+import json
 import hashlib
 import csv
 import io
-import json
 
 from app.core.database import get_db
 from app.core.security import require_admin, get_password_hash
@@ -24,11 +24,17 @@ from app.models.progress import UserProgress
 from app.models.text_study import StudyText
 from app.utils.text_sanitize import sanitize_unmatched_brackets
 from app.services.ai_teacher import ai_teacher_service
+from services.dictionary_api import enrich_word_from_api
+from enrich_words_api import translate_en_to_pt_br, translate_pt_br_to_en
 from app.schemas.admin import (
     AdminStats,
+    AdminPerformanceReport,
+    AdminPerformanceOverview,
+    AdminUserPerformance,
     UserCreateAdmin,
     WordCreate,
     WordUpdate,
+    WordAIFillRequest,
     WordResponse,
     SentenceCreate,
     SentenceUpdate,
@@ -90,6 +96,87 @@ async def get_admin_stats(
     }
 
 
+@router.get("/performance", response_model=AdminPerformanceReport)
+async def get_admin_performance(
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Relatório de desempenho geral e individual dos alunos"""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    total_users = db.query(func.count(User.id)).scalar() or 0
+    active_users = db.query(func.count(User.id)).filter(User.last_study_date >= since).scalar() or 0
+
+    reviews_base = db.query(Review).filter(Review.reviewed_at >= since)
+    total_reviews = reviews_base.count() or 0
+    total_unique_words = (
+        reviews_base.with_entities(func.count(func.distinct(Review.word_id))).scalar() or 0
+    )
+    correct_reviews = (
+        reviews_base.filter(Review.difficulty.in_(["easy", "medium"])).count() or 0
+    )
+
+    accuracy_percent = (correct_reviews / total_reviews * 100) if total_reviews else 0.0
+    reviews_per_active_user = (total_reviews / active_users) if active_users else 0.0
+
+    overview = AdminPerformanceOverview(
+        total_users=total_users,
+        active_users=active_users,
+        total_reviews=total_reviews,
+        total_unique_words=total_unique_words,
+        accuracy_percent=round(accuracy_percent, 2),
+        reviews_per_active_user=round(reviews_per_active_user, 2)
+    )
+
+    correct_reviews_expr = func.coalesce(
+        func.sum(cast(Review.difficulty.in_(["easy", "medium"]), Integer)),
+        0
+    ).label("correct_reviews")
+
+    user_rows = (
+        db.query(
+            User.id.label("user_id"),
+            User.name,
+            User.email,
+            User.last_study_date,
+            User.current_streak,
+            func.count(Review.id).label("total_reviews"),
+            func.count(func.distinct(Review.word_id)).label("unique_words"),
+            correct_reviews_expr
+        )
+        .outerjoin(
+            Review,
+            and_(Review.user_id == User.id, Review.reviewed_at >= since)
+        )
+        .group_by(User.id)
+        .order_by(desc("total_reviews"), User.name.asc())
+        .limit(limit)
+        .all()
+    )
+
+    users: List[AdminUserPerformance] = []
+    for row in user_rows:
+        total_user_reviews = int(row.total_reviews or 0)
+        correct_user_reviews = int(row.correct_reviews or 0)
+        user_accuracy = (correct_user_reviews / total_user_reviews * 100) if total_user_reviews else 0.0
+        users.append(
+            AdminUserPerformance(
+                user_id=row.user_id,
+                name=row.name,
+                email=row.email,
+                last_study_date=row.last_study_date,
+                current_streak=row.current_streak,
+                total_reviews=total_user_reviews,
+                unique_words=int(row.unique_words or 0),
+                accuracy_percent=round(user_accuracy, 2)
+            )
+        )
+
+    return AdminPerformanceReport(period_days=days, overview=overview, users=users)
+
+
 # ============== GERENCIAMENTO DE USUÁRIOS ==============
 
 @router.get("/users")
@@ -148,7 +235,7 @@ async def create_user_admin(
         is_admin=bool(user_data.is_admin),
     )
     if user_data.daily_goal is not None:
-        new_user.daily_goal = user_data.daily_goal
+        setattr(new_user, "daily_goal", user_data.daily_goal)
 
     db.add(new_user)
     db.commit()
@@ -181,7 +268,14 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
-    update_data = user_data.dict(exclude_unset=True)
+    update_data = user_data.model_dump(exclude_unset=True)
+    if "password" in update_data:
+        password_value = (update_data.get("password") or "").strip()
+        if password_value:
+            if len(password_value) < 6:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Senha muito curta")
+            setattr(user, "hashed_password", get_password_hash(password_value))
+        update_data.pop("password", None)
     if "phone_number" in update_data:
         phone_value = (update_data.get("phone_number") or "").strip()
         if phone_value:
@@ -302,7 +396,7 @@ async def create_word(
     current_user: User = Depends(require_admin)
 ):
     """Criar uma nova palavra"""
-    payload = word.dict()
+    payload = word.model_dump()
     payload["english"] = sanitize_unmatched_brackets(payload.get("english"))
     payload["portuguese"] = sanitize_unmatched_brackets(payload.get("portuguese"))
 
@@ -330,7 +424,7 @@ async def update_word(
     if not word:
         raise HTTPException(status_code=404, detail="Palavra não encontrada")
 
-    update_data = word_data.dict(exclude_unset=True)
+    update_data = word_data.model_dump(exclude_unset=True)
     if "english" in update_data:
         update_data["english"] = sanitize_unmatched_brackets(update_data.get("english"))
     if "portuguese" in update_data:
@@ -340,6 +434,176 @@ async def update_word(
 
     db.commit()
     db.refresh(word)
+    return word
+
+
+@router.post("/words/{word_id}/ai-fill", response_model=WordResponse)
+async def ai_fill_word(
+    word_id: int,
+    payload: WordAIFillRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Preenche campos faltantes de uma palavra usando IA/APIs de dicionário."""
+    word = db.query(Word).filter(Word.id == word_id).first()
+    if not word:
+        raise HTTPException(status_code=404, detail="Palavra não encontrada")
+
+    fields = set(payload.fields or [
+        "portuguese",
+        "word_type",
+        "definition_en",
+        "definition_pt",
+        "example_en",
+        "example_pt",
+        "ipa",
+        "synonyms",
+        "antonyms",
+    ])
+    overwrite = bool(payload.overwrite)
+
+    def _is_empty(value: Optional[str]) -> bool:
+        return value is None or (isinstance(value, str) and not value.strip())
+
+    def _should_fill(field_name: str) -> bool:
+        if overwrite:
+            return True
+        return _is_empty(getattr(word, field_name, None))
+
+    updated = False
+    api_data = enrich_word_from_api(word.english) or {}
+
+    if "portuguese" in fields and _should_fill("portuguese"):
+        if word.definition_en:
+            translated = translate_en_to_pt_br(word.definition_en)
+            if translated:
+                setattr(word, "portuguese", translated)
+                updated = True
+
+    if "word_type" in fields and _should_fill("word_type"):
+        value = api_data.get("word_type")
+        if value:
+            setattr(word, "word_type", value)
+            updated = True
+
+    if "ipa" in fields and _should_fill("ipa"):
+        value = api_data.get("ipa")
+        if value:
+            setattr(word, "ipa", value)
+            updated = True
+
+    if "synonyms" in fields and _should_fill("synonyms"):
+        value = api_data.get("synonyms")
+        if value:
+            setattr(word, "synonyms", value)
+            updated = True
+
+    if "antonyms" in fields and _should_fill("antonyms"):
+        value = api_data.get("antonyms")
+        if value:
+            setattr(word, "antonyms", value)
+            updated = True
+
+    if "definition_en" in fields and _should_fill("definition_en"):
+        value = api_data.get("definition_en")
+        if value:
+            setattr(word, "definition_en", value)
+            updated = True
+        elif word.definition_pt:
+            translated = translate_pt_br_to_en(word.definition_pt)
+            if translated:
+                setattr(word, "definition_en", translated)
+                updated = True
+
+    if "definition_pt" in fields and _should_fill("definition_pt"):
+        if word.definition_en:
+            translated = translate_en_to_pt_br(word.definition_en)
+            if translated:
+                setattr(word, "definition_pt", translated)
+                updated = True
+
+    if "example_en" in fields and _should_fill("example_en"):
+        examples = api_data.get("example_sentences") or []
+        example_en = None
+        if isinstance(examples, list) and examples:
+            first = examples[0]
+            if isinstance(first, dict):
+                example_en = first.get("en")
+            elif isinstance(first, str):
+                example_en = first
+        if example_en:
+            setattr(word, "example_en", example_en)
+            updated = True
+
+    if "example_pt" in fields and _should_fill("example_pt"):
+        if word.example_en:
+            translated = translate_en_to_pt_br(word.example_en)
+            if translated:
+                setattr(word, "example_pt", translated)
+                updated = True
+
+    missing_fields = [f for f in fields if _should_fill(f)]
+
+    if missing_fields:
+        system_prompt = (
+            "You are a bilingual lexicographer. Fill missing fields for an English word. "
+            "Return ONLY valid JSON with the keys: portuguese, word_type, definition_en, definition_pt, "
+            "example_en, example_pt, ipa, synonyms, antonyms. Use empty string for unknown fields."
+        )
+        user_prompt = {
+            "english": word.english,
+            "level": word.level,
+            "current": {
+                "portuguese": word.portuguese,
+                "word_type": word.word_type,
+                "definition_en": word.definition_en,
+                "definition_pt": word.definition_pt,
+                "example_en": word.example_en,
+                "example_pt": word.example_pt,
+                "ipa": word.ipa,
+                "synonyms": word.synonyms,
+                "antonyms": word.antonyms,
+            },
+            "missing_fields": missing_fields,
+        }
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(user_prompt, ensure_ascii=False)},
+        ]
+
+        try:
+            ai_result = await ai_teacher_service.get_ai_response_messages_prefer_deepseek(
+                messages,
+                db=db,
+                cache_operation="words.ai.fill",
+                cache_scope="global",
+            )
+            ai_text = (ai_result.get("response") or "").strip()
+            ai_json = None
+            try:
+                ai_json = json.loads(ai_text)
+            except json.JSONDecodeError:
+                start = ai_text.find("{")
+                end = ai_text.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    ai_json = json.loads(ai_text[start:end + 1])
+
+            if isinstance(ai_json, dict):
+                for key in missing_fields:
+                    if key not in ai_json:
+                        continue
+                    value = ai_json.get(key)
+                    if isinstance(value, str) and value.strip():
+                        setattr(word, key, value.strip())
+                        updated = True
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Falha ao preencher com IA: {e}")
+
+    if updated:
+        db.commit()
+        db.refresh(word)
+
     return word
 
 
@@ -371,7 +635,7 @@ async def bulk_import_words(
     Formato esperado:
     english,ipa,portuguese,level,word_type,definition_en,definition_pt,example_en,example_pt,tags
     """
-    if not file.filename.endswith('.csv'):
+    if not file.filename or not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Apenas arquivos CSV são aceitos")
 
     content = await file.read()
@@ -514,7 +778,7 @@ async def create_sentence(
     current_user: User = Depends(require_admin)
 ):
     """Criar uma nova sentença"""
-    new_sentence = Sentence(**sentence.dict())
+    new_sentence = Sentence(**sentence.model_dump())
     db.add(new_sentence)
     db.commit()
     db.refresh(new_sentence)
@@ -533,7 +797,7 @@ async def update_sentence(
     if not sentence:
         raise HTTPException(status_code=404, detail="Sentença não encontrada")
 
-    update_data = sentence_data.dict(exclude_unset=True)
+    update_data = sentence_data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(sentence, field, value)
 
@@ -569,7 +833,7 @@ async def bulk_import_sentences(
 
     Formato: english,portuguese,level,category,grammar_points
     """
-    if not file.filename.endswith('.csv'):
+    if not file.filename or not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Apenas arquivos CSV são aceitos")
 
     content = await file.read()
@@ -714,7 +978,7 @@ async def create_video(
     current_user: User = Depends(require_admin)
 ):
     """Adicionar novo vídeo"""
-    new_video = Video(**video.dict())
+    new_video = Video(**video.model_dump())
     db.add(new_video)
     db.commit()
     db.refresh(new_video)
@@ -733,7 +997,7 @@ async def update_video(
     if not video:
         raise HTTPException(status_code=404, detail="Vídeo não encontrado")
 
-    update_data = video_data.dict(exclude_unset=True)
+    update_data = video_data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(video, field, value)
 
@@ -811,7 +1075,7 @@ async def create_text_admin(
     current_user: User = Depends(require_admin)
 ):
     """Criar um texto de estudo"""
-    new_text = StudyText(**payload.dict())
+    new_text = StudyText(**payload.model_dump())
     db.add(new_text)
     db.commit()
     db.refresh(new_text)
@@ -830,7 +1094,7 @@ async def update_text_admin(
     if not text:
         raise HTTPException(status_code=404, detail="Texto não encontrado")
 
-    update_data = payload.dict(exclude_unset=True)
+    update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(text, field, value)
 
@@ -913,7 +1177,7 @@ async def generate_text_audio_admin(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao salvar arquivo de áudio: {str(e)}")
 
-    text.audio_url = f"/static/texts/{filename}"
+    setattr(text, "audio_url", f"/static/texts/{filename}")
     db.commit()
     db.refresh(text)
     return text

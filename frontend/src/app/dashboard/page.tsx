@@ -22,6 +22,7 @@ import {
   Shield,
   GraduationCap,
   MessageCircle,
+  User,
 } from 'lucide-react';
 
 export default function DashboardPage() {
@@ -91,6 +92,13 @@ export default function DashboardPage() {
           <div className="flex items-center gap-4">
             <span className="text-gray-600 dark:text-gray-300">Olá, {user.name.split(' ')[0]}</span>
             <ThemeToggle />
+            <Link
+              href="/profile"
+              className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition"
+              title="Minha conta"
+            >
+              <User className="h-5 w-5" />
+            </Link>
             <button
               onClick={handleLogout}
               className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition"

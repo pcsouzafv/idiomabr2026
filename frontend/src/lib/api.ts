@@ -52,6 +52,15 @@ export const authApi = {
   
   updateMe: (data: { name?: string; daily_goal?: number; phone_number?: string }) =>
     api.put('/api/auth/me', data),
+
+  changePassword: (data: { current_password: string; new_password: string }) =>
+    api.post('/api/auth/change-password', data),
+
+  forgotPassword: (data: { email: string }) =>
+    api.post('/api/auth/forgot-password', data),
+
+  resetPassword: (data: { token: string; new_password: string }) =>
+    api.post('/api/auth/reset-password', data),
 };
 
 // Words
@@ -107,6 +116,11 @@ export const gamesApi = {
     api.post('/api/games/sentence-builder/start', null, { params }),
   submitSentenceBuilder: (data: { session_id: string; answers: { item_id: string; tokens: string[] }[]; time_spent?: number }) =>
     api.post('/api/games/sentence-builder/submit', data),
+
+  startGrammarBuilder: (params?: { num_sentences?: number; tense?: string; level?: number }) =>
+    api.post('/api/games/grammar-builder/start', null, { params }),
+  submitGrammarBuilder: (data: { session_id: string; answers: { item_id: string; tokens: string[] }[]; time_spent?: number }) =>
+    api.post('/api/games/grammar-builder/submit', data),
 };
 
 export const statsApi = {

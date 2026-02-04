@@ -305,6 +305,104 @@ Always respond in Portuguese unless the student practices in English."""
 
         raise Exception("Nenhum modelo de IA configurado.")
 
+    async def get_ai_response_messages_prefer_deepseek(
+        self,
+        messages: List[Dict[str, str]],
+        *,
+        db: Optional[Session] = None,
+        cache_operation: str = "chat.messages.deepseek",
+        cache_scope: str = "global",
+    ) -> Dict[str, Any]:
+        """Executa uma chamada de IA priorizando DeepSeek, com fallback para OpenAI/Ollama."""
+
+        if not messages:
+            return {"response": "", "model_used": "none", "context_used": None}
+
+        cache_key: Optional[str] = None
+        cache_payload: Optional[Dict[str, Any]] = None
+
+        if db is not None:
+            cache_payload = {
+                "messages": messages,
+                "operation": cache_operation,
+            }
+            cache_key = self._make_cache_key(operation=cache_operation, scope=cache_scope, payload=cache_payload)
+            cached = self._get_cache_entry(db, cache_key)
+            if cached and cached.status == "ok" and (cached.response_text is not None or cached.response_json is not None):
+                self._touch_cache_hit(db, cached.id)
+                db.commit()
+                return {
+                    "response": cached.response_text or "",
+                    "model_used": cached.provider or "cache",
+                    "context_used": None,
+                    "cached": True,
+                }
+
+        # 1) DeepSeek (preferido)
+        if self.deepseek_client:
+            try:
+                print("[REQUEST] Sending request to DeepSeek...")
+                response = await self._get_deepseek_response(messages)
+                print(f"[SUCCESS] DeepSeek responded: {len(response)} characters")
+                if db is not None and cache_key is not None and cache_payload is not None:
+                    self._store_cache_entry(
+                        db,
+                        cache_key=cache_key,
+                        scope=cache_scope,
+                        operation=cache_operation,
+                        provider="deepseek",
+                        model="deepseek-chat",
+                        request_json=cache_payload,
+                        response_text=response,
+                    )
+                    db.commit()
+                return {"response": response, "model_used": "deepseek", "context_used": None}
+            except Exception as e:
+                print(f"[ERROR] DeepSeek error: {e}")
+
+        # 2) OpenAI (fallback)
+        if self.openai_client:
+            try:
+                response = await self._get_openai_response(messages)
+                if db is not None and cache_key is not None and cache_payload is not None:
+                    self._store_cache_entry(
+                        db,
+                        cache_key=cache_key,
+                        scope=cache_scope,
+                        operation=cache_operation,
+                        provider="openai",
+                        model="gpt-4o-mini",
+                        request_json=cache_payload,
+                        response_text=response,
+                    )
+                    db.commit()
+                return {"response": response, "model_used": "openai", "context_used": None}
+            except Exception as e:
+                print(f"OpenAI error: {e}")
+
+        # 3) Ollama (fallback opcional)
+        if self.use_ollama_fallback:
+            try:
+                response = await self._get_ollama_response(messages)
+                if db is not None and cache_key is not None and cache_payload is not None:
+                    self._store_cache_entry(
+                        db,
+                        cache_key=cache_key,
+                        scope=cache_scope,
+                        operation=cache_operation,
+                        provider="ollama",
+                        model="llama3.2",
+                        request_json=cache_payload,
+                        response_text=response,
+                    )
+                    db.commit()
+                return {"response": response, "model_used": "ollama", "context_used": None}
+            except Exception as e:
+                print(f"Ollama error: {e}")
+                raise Exception("Nenhum modelo de IA disponível no momento. Verifique as configurações.")
+
+        raise Exception("Nenhum modelo de IA configurado.")
+
     async def get_ai_response_messages(
         self,
         messages: List[Dict[str, str]],

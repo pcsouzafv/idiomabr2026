@@ -320,18 +320,6 @@ Prefer English.`
     setBrowserSttAvailable(true);
   }, []);
 
-  const stopMicRecording = useCallback(() => {
-    const recorder = micRecorderRef.current;
-    if (!recorder) return;
-    if (recorder.state !== 'inactive') {
-      try {
-        recorder.stop();
-      } catch {
-        // ignore
-      }
-    }
-  }, []);
-
   // Auto-scroll para última mensagem
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -370,7 +358,7 @@ Prefer English.`
   const playTextAsAudio = useCallback(async (text: string) => {
     try {
       if (isListeningRef.current && !manualStopListeningRef.current) {
-        stopListening();
+        stopListeningRef.current();
       }
       isSpeakingRef.current = true;
       setIsSpeaking(true);
@@ -439,7 +427,7 @@ Prefer English.`
         startListeningRef.current();
       }
     }
-  }, [cleanupCurrentAudioUrl, getAxiosResponseStatus, selectedVoice, stopListening]);
+  }, [cleanupCurrentAudioUrl, getAxiosResponseStatus, selectedVoice]);
 
   const startLesson = useCallback(async () => {
     const parsedQuestions = lessonQuestionsText

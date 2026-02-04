@@ -29,6 +29,18 @@ class Settings(BaseSettings):
     # Regex for dynamic preview domains (ngrok/Cloud Run, etc.)
     cors_allow_origin_regex: str = r"https://.*\.(ngrok-free\.app|run\.app|a\.run\.app)"
 
+    # Frontend base URL (for password reset links)
+    frontend_base_url: str = "http://localhost:3000"
+
+    # SMTP (password reset emails)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_tls: bool = True
+    smtp_ssl: bool = False
+
     # AI Services
     deepseek_api_key: str = ""
     openai_api_key: str = ""

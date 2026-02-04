@@ -38,6 +38,20 @@ class UserUpdate(BaseModel):
     phone_number: Optional[str] = None
 
 
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    new_password: str
+
+
 # Token Schemas
 class Token(BaseModel):
     access_token: str

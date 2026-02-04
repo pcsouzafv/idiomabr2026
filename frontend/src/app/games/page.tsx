@@ -16,7 +16,8 @@ import {
   Star,
   Zap,
   Target,
-  Sparkles
+  Sparkles,
+  PenTool
 } from 'lucide-react';
 
 const games = [
@@ -69,6 +70,16 @@ const games = [
     href: '/games/sentence-builder',
     difficulty: 'Médio',
     xp: '20-80 XP'
+  },
+  {
+    id: 'grammar-builder',
+    name: 'Gramática',
+    description: 'Construa frases com foco em verbos, tempos e ordem correta',
+    icon: PenTool,
+    color: 'from-indigo-500 to-purple-600',
+    href: '/games/grammar-builder',
+    difficulty: 'Médio',
+    xp: '20-90 XP'
   },
   {
     id: 'flashcards',

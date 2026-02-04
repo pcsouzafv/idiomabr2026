@@ -9,6 +9,7 @@ import random
 import uuid
 import math
 import json
+import re
 from datetime import datetime, timezone, timedelta
 
 from app.core.database import get_db
@@ -21,6 +22,7 @@ from app.models.progress import UserProgress
 from app.models.gamification import UserStats, GameSession, Achievement, UserAchievement
 from app.models.sentence import Sentence
 from app.services.spaced_repetition import calculate_next_review
+from app.services.ai_teacher import ai_teacher_service
 from app.services.session_store import get_session_store
 from app.schemas.games import (
     QuizSessionResponse, QuizQuestion,
@@ -32,6 +34,8 @@ from app.schemas.games import (
     DictationResultRequest, DictationResultResponse,
     SentenceBuilderItem, SentenceBuilderSessionResponse,
     SentenceBuilderSubmitRequest, SentenceBuilderSubmitResponse,
+    GrammarBuilderItem, GrammarBuilderSessionResponse,
+    GrammarBuilderSubmitRequest, GrammarBuilderSubmitResponse,
     GameSessionResponse
 )
 
@@ -67,7 +71,8 @@ XP_REWARDS = {
     "hangman": {"win": 30, "letter": 2},
     "matching": {"base": 20, "time_bonus_per_second": 1, "max_time_bonus": 100},
     "dictation": {"base": 5, "correct": 15, "perfect_bonus": 75},
-    "sentence_builder": {"base": 10, "correct": 15, "perfect_bonus": 50}
+    "sentence_builder": {"base": 10, "correct": 15, "perfect_bonus": 50},
+    "grammar_builder": {"base": 10, "correct": 15, "perfect_bonus": 50}
 }
 
 
@@ -96,6 +101,10 @@ def _pick_sentence_from_word(word: Word) -> tuple[str, str]:
         except Exception:
             pass
 
+    sentence_pt = _sanitize_sentence_pt(sentence_pt)
+    if not sentence_pt:
+        sentence_pt = (word.portuguese or "").strip()
+
     return sentence_en, sentence_pt
 
 
@@ -121,11 +130,331 @@ def _max_tokens_for_level(level: Optional[str]) -> int:
 
 def _pick_focus_word(tokens: list[str]) -> str:
     # Prefer an alphabetic token to show as "palavra foco".
+    stopwords = {
+        "a", "an", "the", "to", "of", "and", "or", "but", "for", "with",
+        "at", "in", "on", "from", "by", "is", "are", "was", "were", "be",
+        "been", "being", "do", "does", "did", "have", "has", "had", "i",
+        "you", "he", "she", "it", "we", "they", "me", "him", "her", "them",
+        "my", "your", "his", "her", "its", "our", "their", "this", "that",
+        "these", "those", "there", "here", "as", "so", "if", "then", "when",
+    }
     for t in tokens:
-        clean = "".join([c for c in t if c.isalpha()])
-        if len(clean) >= 3:
-            return clean.lower()
-    return (tokens[0].lower() if tokens else "")
+        clean = "".join([c for c in t if c.isalpha()]).lower()
+        if len(clean) >= 3 and clean not in stopwords:
+            return clean
+    # Fallback: use the longest alphabetic token
+    longest = ""
+    for t in tokens:
+        clean = "".join([c for c in t if c.isalpha()]).lower()
+        if len(clean) > len(longest):
+            longest = clean
+    return longest
+
+
+def _sanitize_sentence_pt(text: str) -> str:
+    if not text:
+        return ""
+    normalized = " ".join(text.strip().split())
+    lowered = normalized.lower()
+
+    if re.search(r"\b(ao|na|no|de)\s+(o|a|os|as)\b", lowered):
+        return ""
+
+    replacements = {
+        "A mercado": "O mercado",
+        "A posto": "O posto",
+        "A posto de gasolina": "O posto de gasolina",
+        "A shopping": "O shopping",
+    }
+    for src, dst in replacements.items():
+        if normalized.startswith(src):
+            normalized = normalized.replace(src, dst, 1)
+            lowered = normalized.lower()
+            break
+
+    if normalized.startswith("A ") and "está" in lowered:
+        fem_map = {
+            "caro": "cara",
+            "barato": "barata",
+            "limpo": "limpa",
+            "cheio": "cheia",
+            "tranquilo": "tranquila",
+            "movimentado": "movimentada",
+        }
+        for masc, fem in fem_map.items():
+            normalized = re.sub(rf"\bestá\s+{masc}\b", f"está {fem}", normalized, flags=re.IGNORECASE)
+
+    normalized = re.sub(
+        r"\bEu\s+passar\s+pano\b",
+        "Eu passo pano",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+
+    normalized = re.sub(
+        r"\bEu\s+lavar\b",
+        "Eu lavo",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+
+    normalized = normalized.replace("depois do um lanche tarde", "depois de um lanche da tarde")
+
+    normalized = normalized.replace(" na domingo", " no domingo")
+    normalized = normalized.replace(" na sábado", " no sábado")
+
+    return normalized
+
+
+def _normalize_grammar_token(token: str) -> str:
+    return re.sub(r"[^a-zA-Z']", "", token).strip().lower()
+
+
+def _parse_grammar_points(raw: Optional[str]) -> list[str]:
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(x).strip() for x in parsed if str(x).strip()]
+        if isinstance(parsed, str):
+            return [parsed.strip()] if parsed.strip() else []
+    except Exception:
+        pass
+    # Fallback: split by comma
+    return [p.strip() for p in str(raw).split(',') if p.strip()]
+
+
+def _extract_sentence_tense(grammar_points: list[str]) -> Optional[str]:
+    joined = " ".join(grammar_points).lower()
+    if "past" in joined:
+        return "past"
+    if "future" in joined:
+        return "future"
+    if "present" in joined:
+        return "present"
+    return None
+
+
+def _map_sentence_level_to_numeric(level: Optional[str]) -> int:
+    if not level:
+        return 0
+    normalized = level.strip().upper()
+    if normalized == "A1":
+        return 1
+    if normalized == "A2":
+        return 2
+    if normalized in ("B1", "B2", "C1", "C2"):
+        return 3
+    return 0
+
+
+def _extract_json_object(text: str) -> Optional[dict]:
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    match = re.search(r"\{[\s\S]*\}", text)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        return None
+    return None
+
+
+async def _generate_grammar_tip_explanation(
+    *,
+    sentence_en: str,
+    sentence_pt: str,
+    grammar_points: list[str],
+    level: Optional[str],
+    tense_value: Optional[str],
+    category: Optional[str],
+    db: Session,
+    sentence_id: int,
+    fallback_tip: str,
+    fallback_explanation: str,
+) -> tuple[str, str]:
+    system_prompt = (
+        "You are an expert English teacher for Brazilian Portuguese students. "
+        "Generate concise learning guidance for a sentence-building exercise. "
+        "Return JSON only with keys: tip, explanation. "
+        "tip: 1 short sentence. explanation: 2-4 short sentences in Portuguese, "
+        "include word order, verb form, and 1 mini example if useful."
+    )
+
+    user_prompt = (
+        f"Sentence (EN): {sentence_en}\n"
+        f"Sentence (PT): {sentence_pt}\n"
+        f"CEFR level: {level or 'unknown'}\n"
+        f"Tense: {tense_value or 'unknown'}\n"
+        f"Grammar points: {', '.join(grammar_points) if grammar_points else 'none'}\n"
+        f"Topic: {category or 'general'}\n\n"
+        "Return JSON only."
+    )
+
+    try:
+        ai = await ai_teacher_service.get_ai_response_messages_prefer_deepseek(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            db=db,
+            cache_operation="grammar_builder.tip.v1",
+            cache_scope=f"sentence:{sentence_id}",
+        )
+        data = _extract_json_object(ai.get("response", "")) or {}
+        tip_value = str(data.get("tip") or "").strip()
+        explanation_value = str(data.get("explanation") or "").strip()
+        if tip_value and explanation_value:
+            return tip_value, explanation_value
+    except Exception as exc:
+        print(f"[WARN] Grammar AI tip failed: {exc}")
+
+    return fallback_tip, fallback_explanation
+
+
+GRAMMAR_SENTENCES = [
+    {
+        "id": "g1",
+        "level": 1,
+        "tense": "present",
+        "portuguese": "Eu gosto de pizza.",
+        "english": "I like pizza",
+        "verb": "like",
+        "tip": "Sujeito + Verbo + Objeto (ordem básica SVO)",
+        "explanation": "Em inglês, a estrutura básica é sempre Sujeito (I) + Verbo (like) + Objeto (pizza).",
+    },
+    {
+        "id": "g2",
+        "level": 1,
+        "tense": "present",
+        "portuguese": "Ela estuda inglês todos os dias.",
+        "english": "She studies English every day",
+        "verb": "studies",
+        "tip": "Sujeito + Verbo + Objeto + Tempo (SVO + When)",
+        "explanation": "O complemento de tempo (every day) vem sempre no final da frase.",
+    },
+    {
+        "id": "g3",
+        "level": 1,
+        "tense": "present",
+        "portuguese": "Nós jogamos futebol no parque.",
+        "english": "We play soccer at the park",
+        "verb": "play",
+        "tip": "Sujeito + Verbo + Objeto + Lugar (SVO + Where)",
+        "explanation": "O lugar (at the park) vem após o objeto.",
+    },
+    {
+        "id": "g4",
+        "level": 1,
+        "tense": "present",
+        "portuguese": "Eles moram no Brasil.",
+        "english": "They live in Brazil",
+        "verb": "live",
+        "tip": "Sujeito + Verbo + Complemento de Lugar",
+        "explanation": "O verbo 'live' precisa da preposição 'in' para indicar o local.",
+    },
+    {
+        "id": "g5",
+        "level": 1,
+        "tense": "present",
+        "portuguese": "O cachorro corre rápido.",
+        "english": "The dog runs fast",
+        "verb": "runs",
+        "tip": "Sujeito + Verbo + Advérbio (como o verbo é executado)",
+        "explanation": "O advérbio 'fast' descreve como o cachorro corre e vem após o verbo.",
+    },
+    {
+        "id": "g6",
+        "level": 1,
+        "tense": "present",
+        "portuguese": "Você bebe água?",
+        "english": "Do you drink water",
+        "verb": "do drink",
+        "tip": "Perguntas no presente: Do + sujeito + verbo base",
+        "explanation": "Para perguntas no presente, use 'Do' antes do sujeito.",
+    },
+    {
+        "id": "g7",
+        "level": 2,
+        "tense": "present",
+        "portuguese": "Eu realmente gosto de café brasileiro.",
+        "english": "I really like Brazilian coffee",
+        "verb": "like",
+        "tip": "Advérbio vem antes do verbo principal",
+        "explanation": "O advérbio 'really' fica entre o sujeito e o verbo.",
+    },
+    {
+        "id": "g8",
+        "level": 2,
+        "tense": "present",
+        "portuguese": "Ela está lendo um livro agora.",
+        "english": "She is reading a book now",
+        "verb": "is reading",
+        "tip": "Presente contínuo: am/is/are + verbo-ing",
+        "explanation": "Para ações acontecendo agora, use 'to be' + verbo com -ing.",
+    },
+    {
+        "id": "g9",
+        "level": 2,
+        "tense": "present",
+        "portuguese": "Nós sempre tomamos café da manhã juntos.",
+        "english": "We always have breakfast together",
+        "verb": "have",
+        "tip": "Advérbios de frequência vêm antes do verbo principal",
+        "explanation": "'Always' fica antes do verbo 'have'.",
+    },
+    {
+        "id": "g10",
+        "level": 3,
+        "tense": "present",
+        "portuguese": "Eu tenho estudado inglês por três anos.",
+        "english": "I have been studying English for three years",
+        "verb": "have been studying",
+        "tip": "Present Perfect Continuous: have/has + been + verbo-ing",
+        "explanation": "Ação que começou no passado e continua até agora.",
+    },
+    {
+        "id": "g11",
+        "level": 3,
+        "tense": "present",
+        "portuguese": "Eles não comem carne há cinco anos.",
+        "english": "They haven't eaten meat for five years",
+        "verb": "haven't eaten",
+        "tip": "Present Perfect negativo: have/has + not + particípio",
+        "explanation": "Indica que algo não ocorreu durante um período até agora.",
+    },
+    {
+        "id": "g12",
+        "level": 3,
+        "tense": "future",
+        "portuguese": "Ela trabalhará na biblioteca amanhã de manhã.",
+        "english": "She will work at the library tomorrow morning",
+        "verb": "will work",
+        "tip": "Futuro simples: will + verbo base (Lugar + Tempo)",
+        "explanation": "Use 'will' + verbo base. Lugar vem antes de tempo.",
+    },
+    {
+        "id": "g13",
+        "level": 3,
+        "tense": "past",
+        "portuguese": "Eu estava dormindo quando você ligou.",
+        "english": "I was sleeping when you called",
+        "verb": "was sleeping",
+        "tip": "Past Continuous: was/were + verbo-ing",
+        "explanation": "Ação em progresso no passado interrompida por outra.",
+    },
+]
 
 
 def calculate_level(xp: int) -> int:
@@ -388,10 +717,13 @@ def start_sentence_builder(
         Sentence.level == chosen_level,
     )
 
+    # Priorizar sentenças com áudio quando disponível
+    query = query.order_by(func.random())
+
     # Buscar um conjunto maior e filtrar em memória por tamanho.
     # (func.random funciona bem no Postgres; evita carregar a tabela inteira.)
     candidate_limit = max(20, num_sentences * 12)
-    candidates = query.order_by(func.random()).limit(candidate_limit).all()
+    candidates = query.limit(candidate_limit).all()
     if len(candidates) < 1:
         raise HTTPException(
             status_code=400,
@@ -405,7 +737,9 @@ def start_sentence_builder(
     correct_map = {}
     for s in candidates:
         sentence_en = (s.english or "").strip()
-        sentence_pt = (s.portuguese or "").strip()
+        sentence_pt = _sanitize_sentence_pt(s.portuguese or "")
+        if not sentence_pt:
+            continue
         tokens = _tokenize_sentence_builder(sentence_en)
 
         # Evitar frases muito curtas ou longas demais para o nível.
@@ -422,8 +756,10 @@ def start_sentence_builder(
                 # Reaproveita o campo existente sem quebrar o frontend
                 word_id=s.id,
                 focus_word=_pick_focus_word(tokens),
+                sentence_en=sentence_en,
                 sentence_pt=sentence_pt,
                 tokens=shuffled,
+                audio_url=s.audio_url,
             )
         )
 
@@ -538,6 +874,222 @@ def submit_sentence_builder(
     _delete_session(session_id)
 
     return SentenceBuilderSubmitResponse(
+        score=score,
+        total=total,
+        percentage=percentage,
+        xp_earned=xp,
+        results=results,
+    )
+
+
+# ==================== GRAMÁTICA (Grammar Builder) ====================
+
+
+@router.post("/grammar-builder/start", response_model=GrammarBuilderSessionResponse)
+async def start_grammar_builder(
+    num_sentences: int = 8,
+    tense: Optional[str] = None,
+    level: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Inicia uma sessão de gramática focada em verbos e ordem da frase."""
+    _cleanup_sessions()
+
+    chosen_tense = (tense or "").strip().lower()
+    chosen_level = level if level in (1, 2, 3) else None
+
+    query = db.query(Sentence).filter(
+        Sentence.english.isnot(None),
+        Sentence.portuguese.isnot(None),
+    )
+
+    if chosen_level == 1:
+        query = query.filter(Sentence.level.in_(["A1"]))
+    elif chosen_level == 2:
+        query = query.filter(Sentence.level.in_(["A2"]))
+    elif chosen_level == 3:
+        query = query.filter(Sentence.level.in_(["B1", "B2", "C1", "C2"]))
+
+    candidates = query.all()
+
+    if chosen_tense:
+        filtered = []
+        for s in candidates:
+            sentence_pt = _sanitize_sentence_pt(s.portuguese or "")
+            if not sentence_pt:
+                continue
+            grammar_points = _parse_grammar_points(s.grammar_points)
+            tense_value = _extract_sentence_tense(grammar_points)
+            if tense_value == chosen_tense:
+                filtered.append((s, sentence_pt, grammar_points, tense_value))
+        candidates_with_meta = filtered
+    else:
+        candidates_with_meta = []
+        for s in candidates:
+            sentence_pt = _sanitize_sentence_pt(s.portuguese or "")
+            if not sentence_pt:
+                continue
+            grammar_points = _parse_grammar_points(s.grammar_points)
+            candidates_with_meta.append((s, sentence_pt, grammar_points, _extract_sentence_tense(grammar_points)))
+
+    if not candidates_with_meta:
+        raise HTTPException(status_code=400, detail="Não há frases disponíveis para este filtro")
+
+    selected = random.sample(candidates_with_meta, min(num_sentences, len(candidates_with_meta)))
+    items = []
+    correct_map = {}
+
+    for s, sentence_pt, grammar_points, tense_value in selected:
+        tokens = _tokenize_sentence_builder(s.english)
+        shuffled = tokens[:]
+        random.shuffle(shuffled)
+
+        item_id = str(uuid.uuid4())
+        tip_value = "Pontos gramaticais: " + ", ".join(grammar_points) if grammar_points else "Construa a frase com a ordem correta (SVO)."
+        explanation_parts = []
+        if grammar_points:
+            explanation_parts.append(f"Foco: {', '.join(grammar_points)}.")
+        if s.category:
+            explanation_parts.append(f"Tema: {s.category}.")
+        explanation_value = " ".join(explanation_parts).strip()
+
+        tip_value, explanation_value = await _generate_grammar_tip_explanation(
+            sentence_en=s.english,
+            sentence_pt=sentence_pt,
+            grammar_points=grammar_points,
+            level=s.level,
+            tense_value=tense_value,
+            category=s.category,
+            db=db,
+            sentence_id=s.id,
+            fallback_tip=tip_value,
+            fallback_explanation=explanation_value,
+        )
+        mapped_level = _map_sentence_level_to_numeric(s.level)
+        items.append(
+            GrammarBuilderItem(
+                item_id=item_id,
+                sentence_pt=sentence_pt,
+                tokens=shuffled,
+                verb="",
+                tip=tip_value,
+                explanation=explanation_value,
+                level=mapped_level,
+                tense=tense_value or "",
+                expected=s.english,
+                audio_url=s.audio_url,
+            )
+        )
+
+        correct_map[item_id] = {
+            "sentence_en": s.english,
+            "tokens": tokens,
+            "verb": "",
+            "tip": tip_value,
+            "explanation": explanation_value,
+            "level": mapped_level,
+            "tense": tense_value or "",
+            "audio_url": s.audio_url,
+        }
+
+    session_id = str(uuid.uuid4())
+    _save_session(
+        session_id,
+        {
+            "type": "grammar_builder",
+            "user_id": current_user.id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "correct": correct_map,
+        },
+    )
+
+    return GrammarBuilderSessionResponse(session_id=session_id, items=items, total=len(items))
+
+
+@router.post("/grammar-builder/submit", response_model=GrammarBuilderSubmitResponse)
+def submit_grammar_builder(
+    request: GrammarBuilderSubmitRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Submete a sessão de gramática e registra desempenho."""
+    _cleanup_sessions()
+
+    session_id = request.session_id
+    session = _get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Sessao nao encontrada")
+
+    if session.get("user_id") != current_user.id:
+        raise HTTPException(status_code=403, detail="Sessao nao pertence ao usuario")
+    if session.get("type") != "grammar_builder":
+        raise HTTPException(status_code=400, detail="Tipo de sessao invalido")
+
+    correct_map = session.get("correct") or {}
+
+    total = len(correct_map)
+    score = 0
+    results = []
+
+    for ans in request.answers:
+        correct = correct_map.get(ans.item_id)
+        if not correct:
+            continue
+
+        expected_tokens = correct.get("tokens") or []
+        expected_sentence = correct.get("sentence_en") or ""
+
+        user_sentence = " ".join([t for t in (ans.tokens or []) if str(t).strip()]).strip()
+        expected_norm = _normalize_sentence(expected_sentence)
+        user_norm = _normalize_sentence(user_sentence)
+
+        is_correct = user_norm == expected_norm
+        if is_correct:
+            score += 1
+
+        results.append({
+            "item_id": ans.item_id,
+            "correct": is_correct,
+            "expected": expected_sentence,
+            "your_answer": user_sentence,
+            "expected_tokens": expected_tokens,
+            "tip": correct.get("tip") or "",
+            "explanation": correct.get("explanation") or "",
+            "verb": correct.get("verb") or "",
+            "level": correct.get("level"),
+            "tense": correct.get("tense"),
+        })
+
+    percentage = (score / total) * 100 if total > 0 else 0
+
+    xp = XP_REWARDS["grammar_builder"]["base"] + (score * XP_REWARDS["grammar_builder"]["correct"])
+    if score == total and total >= 3:
+        xp += XP_REWARDS["grammar_builder"]["perfect_bonus"]
+
+    stats = get_or_create_stats(db, current_user.id)
+    stats.total_reviews += total  # type: ignore[misc]
+    stats.correct_answers += score  # type: ignore[misc]
+    stats.games_played += 1  # type: ignore[misc]
+    if score == total:
+        stats.games_won += 1  # type: ignore[misc]
+
+    add_xp(db, current_user.id, xp)
+
+    game_session = GameSession(
+        user_id=current_user.id,
+        game_type="grammar_builder",
+        score=score,
+        max_score=total,
+        time_spent=request.time_spent,
+        xp_earned=xp
+    )
+    db.add(game_session)
+    db.commit()
+
+    _delete_session(session_id)
+
+    return GrammarBuilderSubmitResponse(
         score=score,
         total=total,
         percentage=percentage,

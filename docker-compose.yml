@@ -120,6 +120,8 @@ services:
       context: ./stt
       dockerfile: Dockerfile
     container_name: idiomasbr-realtimestt
+    profiles:
+      - stt
     restart: unless-stopped
     environment:
       STT_MODEL: ${STT_MODEL:-small.en}

@@ -16,12 +16,38 @@ interface AdminStats {
   words_by_level: Record<string, number>;
 }
 
+interface AdminPerformanceOverview {
+  total_users: number;
+  active_users: number;
+  total_reviews: number;
+  total_unique_words: number;
+  accuracy_percent: number;
+  reviews_per_active_user: number;
+}
+
+interface AdminUserPerformance {
+  user_id: number;
+  name: string;
+  email: string;
+  last_study_date?: string | null;
+  current_streak: number;
+  total_reviews: number;
+  unique_words: number;
+  accuracy_percent: number;
+}
+
+interface AdminPerformanceReport {
+  period_days: number;
+  overview: AdminPerformanceOverview;
+  users: AdminUserPerformance[];
+}
+
 export default function AdminDashboard() {
   const router = useRouter();
   const { user, token } = useAuthStore();
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "words" | "sentences" | "videos" | "users" | "reading_writing">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "words" | "sentences" | "videos" | "users" | "reading_writing" | "performance">("overview");
 
   useEffect(() => {
     // Verificar se é admin
@@ -151,6 +177,16 @@ export default function AdminDashboard() {
             >
               ✍️ Leitura e Escrita
             </button>
+            <button
+              onClick={() => setActiveTab("performance")}
+              className={`flex-1 px-6 py-4 font-semibold transition-colors ${
+                activeTab === "performance"
+                  ? "bg-purple-600 text-white"
+                  : "bg-white text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              📈 Desempenho
+            </button>
           </div>
 
           <div className="p-6">
@@ -162,6 +198,7 @@ export default function AdminDashboard() {
             {activeTab === "videos" && <VideosTab token={token!} />}
             {activeTab === "users" && <UsersTab token={token!} />}
             {activeTab === "reading_writing" && <ReadingWritingTab />}
+            {activeTab === "performance" && <PerformanceTab token={token!} />}
           </div>
         </div>
       </div>
@@ -261,6 +298,136 @@ function StatCard({ title, value, subtitle, icon, color }: any) {
       </div>
       <h3 className="text-gray-600 font-semibold">{title}</h3>
       <p className="text-sm text-gray-500">{subtitle}</p>
+    </div>
+  );
+}
+
+// ============== TAB: DESEMPENHO ==============
+function PerformanceTab({ token }: { token: string }) {
+  const [report, setReport] = useState<AdminPerformanceReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState(30);
+
+  useEffect(() => {
+    loadReport();
+  }, [days]);
+
+  const loadReport = async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/admin/performance`,
+        {
+          params: { days },
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      setReport(response.data);
+    } catch (error) {
+      console.error("Erro ao carregar relatório de desempenho:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="text-center py-12">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
+      </div>
+    );
+  }
+
+  if (!report) {
+    return (
+      <div className="text-center text-gray-600 py-12">
+        Não foi possível carregar o relatório.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Desempenho dos Alunos</h2>
+          <p className="text-sm text-gray-600">Visão geral e individual do período selecionado.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-semibold text-gray-600">Período:</label>
+          <select
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            aria-label="Período do relatório"
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
+          >
+            <option value={7}>Últimos 7 dias</option>
+            <option value={30}>Últimos 30 dias</option>
+            <option value={90}>Últimos 90 dias</option>
+            <option value={180}>Últimos 180 dias</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <StatCard
+          title="Usuários ativos"
+          value={report.overview.active_users}
+          subtitle={`${report.overview.total_users} usuários totais`}
+          icon="🟢"
+          color="bg-green-500"
+        />
+        <StatCard
+          title="Reviews no período"
+          value={report.overview.total_reviews}
+          subtitle={`${report.overview.total_unique_words} palavras únicas`}
+          icon="✅"
+          color="bg-blue-500"
+        />
+        <StatCard
+          title="Precisão média"
+          value={`${report.overview.accuracy_percent.toFixed(1)}%`}
+          subtitle={`Média ${report.overview.reviews_per_active_user.toFixed(1)} reviews/aluno ativo`}
+          icon="🎯"
+          color="bg-purple-500"
+        />
+      </div>
+
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+        <div className="px-6 py-4 border-b">
+          <h3 className="text-lg font-semibold text-gray-800">Desempenho individual</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Aluno</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Reviews</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Palavras únicas</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Precisão</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Streak</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Último estudo</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {report.users.map((user) => (
+                <tr key={user.user_id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 text-sm font-semibold text-gray-800">{user.name}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{user.email}</td>
+                  <td className="px-6 py-4 text-sm text-right text-gray-700">{user.total_reviews}</td>
+                  <td className="px-6 py-4 text-sm text-right text-gray-700">{user.unique_words}</td>
+                  <td className="px-6 py-4 text-sm text-right text-gray-700">{user.accuracy_percent.toFixed(1)}%</td>
+                  <td className="px-6 py-4 text-sm text-right text-gray-700">{user.current_streak}</td>
+                  <td className="px-6 py-4 text-sm text-right text-gray-600">
+                    {user.last_study_date ? new Date(user.last_study_date).toLocaleDateString() : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

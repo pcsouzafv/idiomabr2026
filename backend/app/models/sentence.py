@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Float
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.database import Base
 
@@ -26,8 +26,8 @@ class Sentence(Base):
     audio_url = Column(String(500), nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     reviews = relationship("SentenceReview", back_populates="sentence")
@@ -47,7 +47,7 @@ class SentenceReview(Base):
     direction = Column(String(20), nullable=False)  # en_to_pt, pt_to_en
 
     # Timestamp
-    reviewed_at = Column(DateTime, default=datetime.utcnow, index=True)
+    reviewed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
 
     # Relationships
     user = relationship("User")
@@ -94,7 +94,7 @@ class AIConversation(Base):
     tokens_used = Column(Integer, default=0)
 
     # Timestamp
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
 
     # Relationships
     user = relationship("User")
