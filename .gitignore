@@ -64,6 +64,11 @@ dump*.sql
 *_backup.sql
 *.sql.gz
 
+# Database backups
+backup_idiomasbr*.sql
+backup_idiomasbr*.dump
+backup_idiomasbr*.sqldocker
+
 # --- Credentials / keys ---
 *.pem
 *.key
