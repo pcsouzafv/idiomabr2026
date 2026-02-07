@@ -93,9 +93,18 @@ const games = [
   }
 ];
 
+const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+
 interface LevelCount {
   level: string;
   count: number;
+}
+
+function mapCefrToGrammarLevel(level: string): number {
+  const normalized = level.trim().toUpperCase();
+  if (normalized === 'A1') return 1;
+  if (normalized === 'A2') return 2;
+  return 3;
 }
 
 export default function GamesPage() {
@@ -105,8 +114,6 @@ export default function GamesPage() {
   const [isLoadingCounts, setIsLoadingCounts] = useState(true);
   const [recommendedLevel, setRecommendedLevel] = useState<string | null>(null);
 
-  const levels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
-
   // Buscar contagem de palavras por nível
   useEffect(() => {
     const fetchLevelCounts = async () => {
@@ -114,7 +121,7 @@ export default function GamesPage() {
         setIsLoadingCounts(true);
         const counts: LevelCount[] = [];
 
-        for (const level of levels) {
+        for (const level of LEVELS) {
           const response = await wordsApi.getWords({
             level,
             per_page: 1,
@@ -168,6 +175,14 @@ export default function GamesPage() {
     return found ? found.count : 0;
   };
 
+  const buildGameHref = (gameId: string, baseHref: string): string => {
+    if (!selectedLevel) return baseHref;
+    if (gameId === 'grammar-builder') {
+      return `${baseHref}?level=${mapCefrToGrammarLevel(selectedLevel)}`;
+    }
+    return `${baseHref}?level=${selectedLevel}`;
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
       {/* Header */}
@@ -219,7 +234,7 @@ export default function GamesPage() {
             >
               Todos os níveis
             </button>
-            {levels.map((level) => {
+            {LEVELS.map((level) => {
               const count = getLevelCount(level);
               const isRecommended = level === recommendedLevel;
               const isLowCount = count < 500;
@@ -296,7 +311,7 @@ export default function GamesPage() {
               transition={{ delay: index * 0.1 }}
             >
               <Link
-                href={selectedLevel ? `${game.href}?level=${selectedLevel}` : game.href}
+                href={buildGameHref(game.id, game.href)}
                 className="block"
               >
                 <div className="bg-gray-800 rounded-2xl overflow-hidden border border-gray-700 hover:border-gray-600 transition group relative">

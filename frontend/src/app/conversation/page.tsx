@@ -54,7 +54,9 @@ export default function ConversationPage() {
   const [selectedVoice, setSelectedVoice] = useState<string>('');
   const [voices, setVoices] = useState<Voice[]>([]);
   const [browserSttAvailable, setBrowserSttAvailable] = useState(false);
-  const [preferBrowserStt, setPreferBrowserStt] = useState(true);
+  const [preferBrowserStt, setPreferBrowserStt] = useState(false);
+  const [realtimeSttAvailable, setRealtimeSttAvailable] = useState(false);
+  const [useRealtimeStt, setUseRealtimeStt] = useState(false);
   const [lessonMode, setLessonMode] = useState(false);
   const [lessonActive, setLessonActive] = useState(false);
   const [lessonQuestionsText, setLessonQuestionsText] = useState('');
@@ -99,7 +101,14 @@ Prefer English.`
   const resumeListeningAfterSendRef = useRef<boolean>(false);
   const showInterimTranscriptRef = useRef<boolean>(false);
   const interimTranscriptRef = useRef<string>('');
-  const preferBrowserSttRef = useRef<boolean>(true);
+  const preferBrowserSttRef = useRef<boolean>(false);
+  const useRealtimeSttRef = useRef<boolean>(false);
+  const realtimeSttAvailableRef = useRef<boolean>(false);
+  const realtimeSttUrlRef = useRef<string>('');
+  const realtimeTranscriptRef = useRef<string>('');
+  const activeSttModeRef = useRef<'server' | 'realtime' | null>(null);
+  const realtimeSttClosingRef = useRef<boolean>(false);
+  const realtimeSttFallbackAlertedRef = useRef<boolean>(false);
   const pressToTalkRef = useRef<boolean>(false);
   const startListeningRef = useRef<() => void>(() => {});
   const stopListeningRef = useRef<() => void>(() => {});
@@ -115,6 +124,7 @@ Prefer English.`
   const sttRecorderRef = useRef<MediaRecorder | null>(null);
   const sttChunksRef = useRef<Blob[]>([]);
   const startServerSttRecordingRef = useRef<() => void>(() => {});
+  const startRealtimeSttRecordingRef = useRef<() => void>(() => {});
   const isSpeakingRef = useRef<boolean>(false);
   const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
   const speechRecognitionActiveRef = useRef<boolean>(false);
@@ -193,6 +203,30 @@ Prefer English.`
   }, [preferBrowserStt]);
 
   useEffect(() => {
+    useRealtimeSttRef.current = useRealtimeStt;
+  }, [useRealtimeStt]);
+
+  useEffect(() => {
+    const explicitUrl = (process.env.NEXT_PUBLIC_STT_WS_URL || '').trim();
+    let resolvedUrl = explicitUrl;
+
+    if (!resolvedUrl && typeof window !== 'undefined') {
+      const host = window.location.hostname;
+      if (host === 'localhost' || host === '127.0.0.1') {
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        resolvedUrl = `${protocol}://localhost:8001`;
+      }
+    }
+
+    const available = resolvedUrl.length > 0;
+    realtimeSttUrlRef.current = resolvedUrl;
+    realtimeSttAvailableRef.current = available;
+    setRealtimeSttAvailable(available);
+    setUseRealtimeStt(false);
+    useRealtimeSttRef.current = false;
+  }, []);
+
+  useEffect(() => {
     pressToTalkRef.current = pressToTalk;
   }, [pressToTalk]);
 
@@ -207,15 +241,6 @@ Prefer English.`
   // Carrega vozes disponíveis
   useEffect(() => {
     loadVoices();
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-    const hasTouch = navigator.maxTouchPoints > 0;
-    if (coarsePointer || hasTouch) {
-      setPressToTalk(true);
-    }
   }, []);
 
   useEffect(() => {
@@ -632,9 +657,72 @@ Prefer English.`
     }
   }, []);
 
+  const applyTranscriptCandidate = useCallback((rawText: string) => {
+    const transcript = (rawText || '').trim();
+    if (!transcript) return;
+
+    if (transcript === lastTranscriptRef.current) {
+      return;
+    }
+    const currentInput = inputMessageRef.current.trim();
+    if (currentInput && transcript.length <= currentInput.length) {
+      return;
+    }
+
+    lastTranscriptRef.current = transcript;
+    finalTranscriptRef.current = transcript;
+    inputMessageRef.current = transcript;
+    setInputMessage(transcript);
+    if (interimTranscriptRef.current) {
+      interimTranscriptRef.current = '';
+      setInterimTranscript('');
+    }
+
+    if (autoSendOnMicEndRef.current && !isLoadingRef.current) {
+      if (transcript !== lastAutoSentTranscriptRef.current) {
+        lastAutoSentTranscriptRef.current = transcript;
+        void sendMessageRef.current(transcript);
+      }
+    }
+  }, []);
+
+  const finishSttCycle = useCallback(() => {
+    setIsTranscribing(false);
+    if (interimTranscriptRef.current) {
+      interimTranscriptRef.current = '';
+      setInterimTranscript('');
+    }
+    if (!autoSendOnMicEndRef.current) {
+      manualStopListeningRef.current = true;
+      isListeningRef.current = false;
+      setIsListening(false);
+      return;
+    }
+    if (isListeningRef.current && !manualStopListeningRef.current) {
+      setTimeout(() => startListeningRef.current(), 150);
+    }
+  }, []);
+
+  const failMicStart = useCallback((message: string) => {
+    activeSttModeRef.current = null;
+    cleanupSttStream();
+    manualStopListeningRef.current = true;
+    isListeningRef.current = false;
+    setIsListening(false);
+    setIsTranscribing(false);
+    if (interimTranscriptRef.current) {
+      interimTranscriptRef.current = '';
+      setInterimTranscript('');
+    }
+    alert(message);
+  }, [cleanupSttStream]);
+
   const startServerSttRecording = useCallback(async () => {
-    if (sttRecorderRef.current || typeof window === 'undefined') return;
-    if (!navigator.mediaDevices?.getUserMedia) return;
+    if (sttRecorderRef.current || sttSourceRef.current || sttWsRef.current || typeof window === 'undefined') return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      failMicStart('Seu navegador nao suporta captura de audio.');
+      return;
+    }
     if (isSpeakingRef.current) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -660,11 +748,11 @@ Prefer English.`
       let lastFrameAt = startedAt;
       let voiceDetected = false;
       let voiceMs = 0;
-      const silenceMs = 900;
+      const silenceMs = 1800;
       const minRecordMs = 1200;
-      const maxWaitForVoiceMs = 4000;
+      const maxWaitForVoiceMs = 8000;
       const minVoiceMs = 300;
-      const voiceThreshold = 0.03;
+      const voiceThreshold = 0.015;
 
       const preferredTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
       const mimeType = preferredTypes.find(
@@ -673,6 +761,7 @@ Prefer English.`
 
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       sttRecorderRef.current = recorder;
+      activeSttModeRef.current = 'server';
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -686,11 +775,12 @@ Prefer English.`
         });
         sttChunksRef.current = [];
         sttRecorderRef.current = null;
+        activeSttModeRef.current = null;
         cleanupSttStream();
 
         if (!audioBlob || audioBlob.size < 800 || !voiceDetected || voiceMs < minVoiceMs) {
           if (isListeningRef.current && !manualStopListeningRef.current) {
-            startServerSttRecordingRef.current();
+            startListeningRef.current();
           }
           return;
         }
@@ -702,45 +792,12 @@ Prefer English.`
         try {
           setIsTranscribing(true);
           const response = await conversationApi.transcribeAudio(formData);
-          const transcript = (response.data?.transcript || '').trim();
-          if (!transcript) return;
-
-          if (transcript === lastTranscriptRef.current) {
-            return;
-          }
-          const currentInput = inputMessageRef.current.trim();
-          if (currentInput && transcript.length <= currentInput.length) {
-            return;
-          }
-
-          lastTranscriptRef.current = transcript;
-          finalTranscriptRef.current = transcript;
-          inputMessageRef.current = transcript;
-          setInputMessage(transcript);
-          if (interimTranscriptRef.current) {
-            interimTranscriptRef.current = '';
-            setInterimTranscript('');
-          }
-
-          if (autoSendOnMicEndRef.current && !isLoadingRef.current) {
-            if (transcript !== lastAutoSentTranscriptRef.current) {
-              lastAutoSentTranscriptRef.current = transcript;
-              void sendMessageRef.current(transcript);
-            }
-          }
+          const transcript = response.data?.transcript || '';
+          applyTranscriptCandidate(transcript);
         } catch (error: unknown) {
           alert('Erro ao transcrever áudio: ' + extractErrorMessage(error));
         } finally {
-          setIsTranscribing(false);
-          if (!autoSendOnMicEndRef.current) {
-            manualStopListeningRef.current = true;
-            isListeningRef.current = false;
-            setIsListening(false);
-            return;
-          }
-          if (isListeningRef.current && !manualStopListeningRef.current) {
-            setTimeout(() => startServerSttRecordingRef.current(), 150);
-          }
+          finishSttCycle();
         }
       };
 
@@ -784,9 +841,9 @@ Prefer English.`
       recorder.start(200);
       requestAnimationFrame(checkSilence);
     } catch {
-      cleanupSttStream();
+      failMicStart('Nao foi possivel acessar o microfone. Verifique a permissao do navegador.');
     }
-  }, [cleanupSttStream, extractErrorMessage]);
+  }, [applyTranscriptCandidate, cleanupSttStream, extractErrorMessage, failMicStart, finishSttCycle]);
 
   useEffect(() => {
     startServerSttRecordingRef.current = () => {
@@ -795,8 +852,267 @@ Prefer English.`
   }, [startServerSttRecording]);
 
   const stopServerSttRecording = useCallback(() => {
+    if (activeSttModeRef.current !== 'server') return;
     stopSttRecorder();
   }, [stopSttRecorder]);
+
+  const startRealtimeSttRecording = useCallback(async () => {
+    if (sttRecorderRef.current || sttSourceRef.current || sttWsRef.current || typeof window === 'undefined') return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      failMicStart('Seu navegador nao suporta captura de audio.');
+      return;
+    }
+    if (isSpeakingRef.current) return;
+
+    const wsUrl = realtimeSttUrlRef.current;
+    if (!wsUrl) {
+      startServerSttRecordingRef.current();
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      sttStreamRef.current = stream;
+      realtimeTranscriptRef.current = '';
+      activeSttModeRef.current = 'realtime';
+      realtimeSttClosingRef.current = false;
+
+      const audioContext = new AudioContext();
+      sttAudioContextRef.current = audioContext;
+      const source = audioContext.createMediaStreamSource(stream);
+      sttSourceRef.current = source;
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      sttProcessorRef.current = processor;
+      const muteGain = audioContext.createGain();
+      muteGain.gain.value = 0;
+      source.connect(processor);
+      processor.connect(muteGain);
+      muteGain.connect(audioContext.destination);
+
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+      sttWsRef.current = ws;
+
+      const encoder = new TextEncoder();
+      const startedAt = Date.now();
+      let lastVoiceAt = startedAt;
+      let lastFrameAt = startedAt;
+      let voiceDetected = false;
+      let voiceMs = 0;
+      let sessionClosed = false;
+
+      const silenceMs = 1800;
+      const minRecordMs = 1200;
+      const maxWaitForVoiceMs = 8000;
+      const maxSessionMs = 30000;
+      const minVoiceMs = 300;
+      const voiceThreshold = 0.015;
+
+      const fallbackToServer = () => {
+        if (sessionClosed) return;
+        sessionClosed = true;
+        activeSttModeRef.current = null;
+        realtimeSttClosingRef.current = true;
+        cleanupSttStream();
+        setIsTranscribing(false);
+        if (interimTranscriptRef.current) {
+          interimTranscriptRef.current = '';
+          setInterimTranscript('');
+        }
+        if (!realtimeSttFallbackAlertedRef.current) {
+          realtimeSttFallbackAlertedRef.current = true;
+          alert('Realtime STT indisponivel. Voltando para STT via servidor.');
+        }
+        setUseRealtimeStt(false);
+        useRealtimeSttRef.current = false;
+        if (isListeningRef.current && !manualStopListeningRef.current) {
+          startServerSttRecordingRef.current();
+        }
+      };
+
+      const stopSession = () => {
+        if (sessionClosed) return;
+        sessionClosed = true;
+        activeSttModeRef.current = null;
+        const transcript = realtimeTranscriptRef.current;
+        realtimeSttClosingRef.current = true;
+        cleanupSttStream();
+        if (transcript) {
+          applyTranscriptCandidate(transcript);
+        }
+        finishSttCycle();
+      };
+
+      ws.onopen = () => {
+        setIsTranscribing(true);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(String(event.data));
+          if (payload?.type !== 'realtime') return;
+          const partial = (payload?.text || '').trim();
+          if (!partial) return;
+          realtimeTranscriptRef.current = partial;
+          const currentInput = inputMessageRef.current.trim();
+          if (!currentInput || partial.length >= currentInput.length) {
+            inputMessageRef.current = partial;
+            setInputMessage(partial);
+          }
+          if (showInterimTranscriptRef.current && partial !== interimTranscriptRef.current) {
+            interimTranscriptRef.current = partial;
+            setInterimTranscript(partial);
+          }
+        } catch {
+          // ignore malformed payloads
+        }
+      };
+
+      ws.onerror = () => {
+        if (realtimeSttClosingRef.current) return;
+        fallbackToServer();
+      };
+
+      ws.onclose = () => {
+        if (realtimeSttClosingRef.current) {
+          realtimeSttClosingRef.current = false;
+          return;
+        }
+        if (!sessionClosed && isListeningRef.current && !manualStopListeningRef.current) {
+          fallbackToServer();
+        }
+      };
+
+      processor.onaudioprocess = (event) => {
+        if (sessionClosed) return;
+        const input = event.inputBuffer.getChannelData(0);
+        if (!input || input.length === 0) return;
+
+        let sum = 0;
+        for (let i = 0; i < input.length; i += 1) {
+          const s = input[i];
+          sum += s * s;
+        }
+        const rms = Math.sqrt(sum / input.length);
+        const now = Date.now();
+        const frameMs = Math.max(0, now - lastFrameAt);
+        lastFrameAt = now;
+
+        if (now - startedAt > maxSessionMs) {
+          const currentTranscript = realtimeTranscriptRef.current.trim();
+          if (currentTranscript) {
+            stopSession();
+          } else {
+            sessionClosed = true;
+            cleanupSttStream();
+            activeSttModeRef.current = null;
+            setIsTranscribing(false);
+            if (interimTranscriptRef.current) {
+              interimTranscriptRef.current = '';
+              setInterimTranscript('');
+            }
+            if (isListeningRef.current && !manualStopListeningRef.current) {
+              startListeningRef.current();
+            }
+          }
+          return;
+        }
+
+        if (rms > voiceThreshold) {
+          voiceDetected = true;
+          voiceMs += frameMs;
+          lastVoiceAt = now;
+        }
+
+        if (voiceDetected) {
+          if (now - startedAt > minRecordMs && now - lastVoiceAt > silenceMs) {
+            if (voiceMs >= minVoiceMs) {
+              stopSession();
+            } else if (isListeningRef.current && !manualStopListeningRef.current) {
+              sessionClosed = true;
+              cleanupSttStream();
+              activeSttModeRef.current = null;
+              setIsTranscribing(false);
+              if (interimTranscriptRef.current) {
+                interimTranscriptRef.current = '';
+                setInterimTranscript('');
+              }
+              startListeningRef.current();
+            }
+            return;
+          }
+        } else if (now - startedAt > maxWaitForVoiceMs) {
+          sessionClosed = true;
+          cleanupSttStream();
+          activeSttModeRef.current = null;
+          setIsTranscribing(false);
+          if (interimTranscriptRef.current) {
+            interimTranscriptRef.current = '';
+            setInterimTranscript('');
+          }
+          if (isListeningRef.current && !manualStopListeningRef.current) {
+            startListeningRef.current();
+          }
+          return;
+        }
+
+        if (ws.readyState !== WebSocket.OPEN) {
+          return;
+        }
+
+        const pcm = new Int16Array(input.length);
+        for (let i = 0; i < input.length; i += 1) {
+          const sample = Math.max(-1, Math.min(1, input[i]));
+          pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+        }
+
+        const metadata = encoder.encode(
+          JSON.stringify({ sampleRate: audioContext.sampleRate })
+        );
+        const packet = new Uint8Array(4 + metadata.length + pcm.byteLength);
+        new DataView(packet.buffer).setUint32(0, metadata.length, true);
+        packet.set(metadata, 4);
+        packet.set(new Uint8Array(pcm.buffer), 4 + metadata.length);
+        ws.send(packet.buffer);
+      };
+    } catch {
+      failMicStart('Nao foi possivel iniciar o Realtime STT. Verifique o microfone e tente novamente.');
+    }
+  }, [applyTranscriptCandidate, cleanupSttStream, failMicStart, finishSttCycle]);
+
+  useEffect(() => {
+    startRealtimeSttRecordingRef.current = () => {
+      void startRealtimeSttRecording();
+    };
+  }, [startRealtimeSttRecording]);
+
+  const stopRealtimeSttStreamOnly = useCallback(() => {
+    if (activeSttModeRef.current !== 'realtime') return;
+    activeSttModeRef.current = null;
+    realtimeSttClosingRef.current = true;
+    cleanupSttStream();
+    setIsTranscribing(false);
+    if (interimTranscriptRef.current) {
+      interimTranscriptRef.current = '';
+      setInterimTranscript('');
+    }
+  }, [cleanupSttStream]);
+
+  const stopRealtimeSttRecording = useCallback(() => {
+    if (activeSttModeRef.current !== 'realtime') return;
+    const transcript = realtimeTranscriptRef.current;
+    stopRealtimeSttStreamOnly();
+    if (transcript) {
+      applyTranscriptCandidate(transcript);
+    }
+    finishSttCycle();
+  }, [applyTranscriptCandidate, finishSttCycle, stopRealtimeSttStreamOnly]);
 
   const startWebSpeechRecognition = useCallback(() => {
     const recognition = speechRecognitionRef.current;
@@ -823,15 +1139,30 @@ Prefer English.`
 
   useEffect(() => {
     const shouldUseWeb = preferBrowserStt && !!speechRecognitionRef.current;
+    const shouldUseRealtime =
+      !shouldUseWeb && useRealtimeStt && realtimeSttAvailable;
     const wasUsingWeb = useWebSpeechRef.current;
     useWebSpeechRef.current = shouldUseWeb;
 
     if (isListeningRef.current) {
-      if (shouldUseWeb && !wasUsingWeb) {
+      if (shouldUseWeb) {
+        stopRealtimeSttStreamOnly();
         stopServerSttRecording();
-        startWebSpeechRecognition();
-      } else if (!shouldUseWeb && wasUsingWeb) {
+        if (!wasUsingWeb) {
+          startWebSpeechRecognition();
+        }
+      } else if (wasUsingWeb) {
         stopWebSpeechRecognition();
+        if (shouldUseRealtime) {
+          startRealtimeSttRecordingRef.current();
+        } else {
+          startServerSttRecordingRef.current();
+        }
+      } else if (shouldUseRealtime && activeSttModeRef.current !== 'realtime') {
+        stopServerSttRecording();
+        startRealtimeSttRecordingRef.current();
+      } else if (!shouldUseRealtime && activeSttModeRef.current !== 'server') {
+        stopRealtimeSttStreamOnly();
         startServerSttRecordingRef.current();
       }
       return;
@@ -840,11 +1171,15 @@ Prefer English.`
     if (!shouldUseWeb && speechRecognitionActiveRef.current) {
       stopWebSpeechRecognition();
     }
-  }, [browserSttAvailable, preferBrowserStt, startWebSpeechRecognition, stopServerSttRecording, stopWebSpeechRecognition]);
+  }, [browserSttAvailable, preferBrowserStt, realtimeSttAvailable, startWebSpeechRecognition, stopRealtimeSttStreamOnly, stopServerSttRecording, stopWebSpeechRecognition, useRealtimeStt]);
 
   const startListening = useCallback(() => {
     if (useWebSpeechRef.current && speechRecognitionRef.current) {
       startWebSpeechRecognition();
+      return;
+    }
+    if (useRealtimeSttRef.current && realtimeSttAvailableRef.current) {
+      startRealtimeSttRecordingRef.current();
       return;
     }
     startServerSttRecordingRef.current();
@@ -855,8 +1190,12 @@ Prefer English.`
       stopWebSpeechRecognition();
       return;
     }
+    if (activeSttModeRef.current === 'realtime') {
+      stopRealtimeSttRecording();
+      return;
+    }
     stopServerSttRecording();
-  }, [stopServerSttRecording, stopWebSpeechRecognition]);
+  }, [stopRealtimeSttRecording, stopServerSttRecording, stopWebSpeechRecognition]);
 
   const clearTranscriptState = useCallback(() => {
     setInputMessage('');
@@ -1256,10 +1595,10 @@ Prefer English.`
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
-      <div className="container mx-auto px-4 py-8 max-w-6xl">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#eff6ff_38%,_#cffafe_100%)] dark:bg-[radial-gradient(circle_at_top,_#0f172a_0%,_#111827_45%,_#030712_100%)]">
+      <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-5 sm:py-8 max-w-6xl">
         {/* Header */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 mb-6">
+        <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-sm rounded-3xl border border-white/60 dark:border-gray-700/80 shadow-xl p-4 sm:p-6 mb-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white mb-2">
@@ -1364,6 +1703,28 @@ Prefer English.`
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
+                    checked={useRealtimeStt}
+                    onChange={(e) => setUseRealtimeStt(e.target.checked)}
+                    className="w-4 h-4"
+                    disabled={!realtimeSttAvailable}
+                  />
+                  <span>Usar Realtime STT (WebSocket local)</span>
+                </label>
+                {realtimeSttAvailable ? (
+                  <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
+                    Usa o container RealtimeSTT para capturar fala em tempo real (porta 8001).
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
+                    Realtime STT indisponivel. Defina NEXT_PUBLIC_STT_WS_URL ou rode local em ws://localhost:8001.
+                  </p>
+                )}
+              </div>
+
+              <div className="mb-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
                     checked={pressToTalk}
                     onChange={(e) => setPressToTalk(e.target.checked)}
                     className="w-4 h-4"
@@ -1395,7 +1756,7 @@ Prefer English.`
                   <span className="font-medium">Microfone (STT via servidor)</span>
                 </label>
                 <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
-                  Envia o áudio para o backend e usa STT em nuvem (Lemonfox). Requer LEMONFOX_API_KEY.
+                  Fallback seguro para o backend (Lemonfox/OpenAI) quando navegador e Realtime STT nao estiverem ativos.
                 </p>
               </div>
 
@@ -1508,9 +1869,9 @@ Prefer English.`
         </div>
 
         {/* Chat Area */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl overflow-hidden flex flex-col min-h-[420px] sm:min-h-[520px]">
+        <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-white/60 dark:border-gray-700 rounded-3xl shadow-xl overflow-hidden flex flex-col min-h-[460px] sm:min-h-[560px]">
           {/* Messages / Intro */}
-          <div className="flex-1 min-h-[260px] max-h-[420px] overflow-y-auto p-6 space-y-4">
+          <div className="flex-1 min-h-[280px] max-h-[50vh] sm:max-h-[56vh] overflow-y-auto p-4 sm:p-6 space-y-4">
             {lessonMode && conversationId && (
               <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900 text-gray-800 dark:text-white">
                 <div className="font-semibold">Modo Lição</div>
@@ -1606,8 +1967,8 @@ Prefer English.`
           </div>
 
           {/* Input Area (sempre visível) */}
-          <div className="border-t dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900">
-            <div className="flex flex-col sm:flex-row gap-2">
+          <div className="border-t border-white/70 dark:border-gray-700 p-3 sm:p-4 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto] gap-2 sm:gap-3 items-stretch">
               <label htmlFor="messageInput" className="sr-only">Mensagem</label>
               <textarea
                 id="messageInput"
@@ -1620,7 +1981,7 @@ Prefer English.`
                   ? "Inicie a lição para responder às perguntas..."
                   : "Digite sua mensagem... (Enter para enviar — microfone pode auto-enviar ao terminar de falar)"
                 }
-                className="w-full sm:flex-1 p-3 border rounded-xl resize-none dark:bg-gray-800 dark:border-gray-600 dark:text-white"
+                className="w-full p-3 border border-gray-300/80 dark:border-gray-600 rounded-2xl resize-none dark:bg-gray-800/90 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
                 rows={2}
                 disabled={isLoading}
               />
@@ -1631,10 +1992,10 @@ Prefer English.`
                 onPointerLeave={handleMicPointerUp}
                 onPointerCancel={handleMicPointerUp}
                 disabled={isLoading}
-                className={`w-full sm:w-auto px-4 py-3 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed ${
+                className={`w-full sm:w-auto px-4 py-3 rounded-2xl font-bold transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
                   isListening
                     ? 'bg-red-500 text-white hover:bg-red-600'
-                    : 'bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600'
+                    : 'bg-gradient-to-r from-sky-500 to-cyan-500 text-white hover:from-sky-600 hover:to-cyan-600 shadow-sky-200 dark:shadow-sky-900/40'
                 }`}
                 title={
                   pressToTalk
@@ -1646,22 +2007,22 @@ Prefer English.`
                       : 'Falar (microfone)'
                 }
               >
-                {isListening ? '????' : '????'}
+                {isListening ? '🎤 Stop Talking' : '🎤 Start Talking'}
               </button>
               <button
                 onClick={() => sendMessage()}
                 disabled={isLoading || !inputMessage.trim() || (lessonMode && !lessonActive)}
-                className="w-full sm:w-auto px-6 py-3 bg-blue-500 text-white rounded-xl font-bold hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-2xl font-bold hover:from-blue-600 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
               >
                 {isLoading ? '⏳' : '📤'}
               </button>
               <button
                 onClick={isRecordingPronunciation ? stopPronunciationRecording : startPronunciationRecording}
                 disabled={isLoading || !lastUserMessageRef.current}
-                className={`w-full sm:w-auto px-4 py-3 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed ${
+                className={`w-full sm:w-auto px-4 py-3 rounded-2xl font-bold transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
                   isRecordingPronunciation
                     ? 'bg-red-500 text-white hover:bg-red-600'
-                    : 'bg-emerald-500 text-white hover:bg-emerald-600'
+                    : 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600'
                 }`}
                 title="Avaliar pronúncia da última resposta enviada"
               >
