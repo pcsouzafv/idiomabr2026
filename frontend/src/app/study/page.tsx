@@ -74,6 +74,11 @@ interface StudyConfig {
   mode: 'mixed' | 'new' | 'review';
 }
 
+interface ExampleSentence {
+  en: string;
+  pt: string;
+}
+
 export default function StudyPage() {
   const { user, isLoading: authLoading, fetchUser, fetchStats, stats: userStats } = useAuthStore();
   const router = useRouter();
@@ -149,11 +154,16 @@ export default function StudyPage() {
   const loadSession = useCallback(async () => {
     try {
       setIsLoading(true);
-      const params: any = {
+      const params: {
+        size: number;
+        direction: StudyConfig['direction'];
+        mode: StudyConfig['mode'];
+        level?: string;
+      } = {
         size: config.size,
         direction: config.direction,
         mode: config.mode,
-        level: config.level,
+        ...(config.level ? { level: config.level } : {}),
       };
 
       const response = await studyApi.getSession(params);
@@ -175,41 +185,8 @@ export default function StudyPage() {
   }, [config]);
 
   const startNewSession = () => {
-    loadSession();
+    void loadSession();
   };
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    if (showConfig || sessionComplete) return;
-
-    const handleKeyPress = (e: KeyboardEvent) => {
-      if (isSubmitting) return;
-
-      // Space to flip card
-      if (e.code === 'Space' && !isFlipped) {
-        e.preventDefault();
-        setIsFlipped(true);
-      }
-
-      // Number keys for difficulty (only when flipped)
-      if (isFlipped) {
-        if (e.key === '1') handleDifficulty('hard');
-        if (e.key === '2') handleDifficulty('medium');
-        if (e.key === '3') handleDifficulty('easy');
-      }
-
-      // S for sentence practice
-      if (e.key === 's' || e.key === 'S') {
-        if (isFlipped && session) {
-          e.preventDefault();
-          handleSentencePractice();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [isFlipped, isSubmitting, sessionComplete, showConfig, session]);
 
   const handleFlip = () => {
     if (!isSubmitting) {
@@ -217,7 +194,7 @@ export default function StudyPage() {
     }
   };
 
-  const handleDifficulty = async (difficulty: 'easy' | 'medium' | 'hard') => {
+  const handleDifficulty = useCallback(async (difficulty: 'easy' | 'medium' | 'hard') => {
     if (!session || isSubmitting) return;
 
     const currentCard = session.cards[currentIndex];
@@ -275,7 +252,7 @@ export default function StudyPage() {
       setShowFeedback(false);
       setLastDifficulty(null);
     }
-  };
+  }, [bestStreak, currentIndex, currentStreak, fetchStats, isSubmitting, session]);
 
   // Função para processar tradução palavra-por-palavra
   const formatWordByWordTranslation = (ptTranslation: string): JSX.Element | null => {
@@ -347,7 +324,7 @@ export default function StudyPage() {
     return 'noun'; // Padrão: substantivo
   };
 
-  const handleSentencePractice = () => {
+  const handleSentencePractice = useCallback(() => {
     if (!session) return;
 
     const currentCard = session.cards[currentIndex];
@@ -402,6 +379,60 @@ export default function StudyPage() {
     }
 
     setShowSentencePractice(true);
+  }, [currentIndex, session]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    if (showConfig || sessionComplete) return;
+
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (isSubmitting) return;
+
+      // Space to flip card
+      if (e.code === 'Space' && !isFlipped) {
+        e.preventDefault();
+        setIsFlipped(true);
+      }
+
+      // Number keys for difficulty (only when flipped)
+      if (isFlipped) {
+        if (e.key === '1') void handleDifficulty('hard');
+        if (e.key === '2') void handleDifficulty('medium');
+        if (e.key === '3') void handleDifficulty('easy');
+      }
+
+      // S for sentence practice
+      if (e.key === 's' || e.key === 'S') {
+        if (isFlipped && session) {
+          e.preventDefault();
+          handleSentencePractice();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [handleDifficulty, handleSentencePractice, isFlipped, isSubmitting, session, sessionComplete, showConfig]);
+
+  const parseExampleSentences = (rawExamples: string | null): ExampleSentence[] => {
+    if (!rawExamples) return [];
+
+    try {
+      const parsed = JSON.parse(rawExamples) as unknown;
+      if (!Array.isArray(parsed)) return [];
+
+      return parsed
+        .map((item) => {
+          if (typeof item !== 'object' || item === null) return null;
+          const en = 'en' in item && typeof item.en === 'string' ? item.en : '';
+          const pt = 'pt' in item && typeof item.pt === 'string' ? item.pt : '';
+          if (!en) return null;
+          return { en, pt };
+        })
+        .filter((item): item is ExampleSentence => item !== null);
+    } catch {
+      return [];
+    }
   };
 
   const speakWord = (text: string) => {
@@ -956,7 +987,7 @@ export default function StudyPage() {
                       <div className="bg-white/10 rounded-lg p-2">
                         <p className="text-xs uppercase tracking-wide opacity-70 mb-1.5">EXEMPLOS</p>
                         <div className="space-y-2">
-                          {JSON.parse(currentCard.word.example_sentences).slice(0, 2).map((ex: any, idx: number) => (
+                          {parseExampleSentences(currentCard.word.example_sentences).slice(0, 2).map((ex, idx: number) => (
                             <div key={idx} className="border-b border-white/10 last:border-0 pb-2 last:pb-0">
                               <p className="text-sm italic font-medium mb-0.5">&quot;{ex.en}&quot;</p>
                               <div className="leading-relaxed text-xs mb-1">

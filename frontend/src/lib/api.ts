@@ -212,7 +212,7 @@ export const conversationApi = {
     text: string;
     voice_id?: string;
     model_id?: string;
-    voice_settings?: any;
+    voice_settings?: Record<string, unknown>;
   }) => api.post('/api/conversation/tts', data, { responseType: 'blob' }),
 
   getVoices: () => api.get('/api/conversation/voices'),

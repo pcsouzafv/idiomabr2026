@@ -165,24 +165,6 @@ export default function QuizPage() {
     startQuiz();
   }, [startQuiz]);
 
-  // Timer
-  useEffect(() => {
-    if (!timerActive || timeLeft <= 0) return;
-
-    const interval = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          // Tempo esgotado - próxima questão
-          handleTimeout();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [timerActive, timeLeft, currentIndex]);
-
   const loadWordDetails = useCallback(async (wordId: number) => {
     try {
       setWordDetailsLoading(true);
@@ -196,7 +178,7 @@ export default function QuizPage() {
     }
   }, []);
 
-  const handleTimeout = () => {
+  const handleTimeout = useCallback(() => {
     if (!session) return;
     if (selectedAnswer !== null) return;
 
@@ -219,7 +201,25 @@ export default function QuizPage() {
 
       return newAnswers;
     });
-  };
+  }, [baseTotal, currentIndex, loadWordDetails, selectedAnswer, session]);
+
+  // Timer
+  useEffect(() => {
+    if (!timerActive || timeLeft <= 0) return;
+
+    const interval = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          // Tempo esgotado - próxima questão
+          handleTimeout();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [handleTimeout, timerActive, timeLeft]);
 
   const handleAnswer = async (optionIndex: number) => {
     if (selectedAnswer !== null || !session) return;
