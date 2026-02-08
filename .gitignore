@@ -83,3 +83,26 @@ backup_idiomasbr*.sqldocker
 # --- Local artifacts ---
 *.tmp
 *.bak
+
+# --- Generated study/export artifacts ---
+corrupted_data.csv
+enrich_full_log.txt
+missing_definition_en.txt*
+missing_examples__words_export*.csv
+sentences_enrichment_*.csv
+sentences_export.csv
+words_export*.csv
+words_report*.html*
+backend/corrupted_data.csv
+backend/missing_examples*.csv
+backend/sentences_enrichment_*.csv
+backend/words_export*.csv
+
+# --- Generated audio artifacts ---
+backend/static/texts/*.mp3
+backend/app/static/texts/*.mp3
+backend/test_audio.mp3
+
+# --- Local reference docs (not source code) ---
+Mais de 5 mil palavras em inglês traduzidas para português.pdf
+backend/Mais de 5 mil palavras em inglês traduzidas para português.pdf
