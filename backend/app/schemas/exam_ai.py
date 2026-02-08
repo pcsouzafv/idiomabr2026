@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional
 
 
@@ -17,6 +17,8 @@ class ExamAIGenerateRequest(BaseModel):
 
 
 class ExamAIGenerateResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     exam: str
     skill: str
     level: Optional[str] = None
@@ -46,6 +48,8 @@ class ExamAIQuestionFeedback(BaseModel):
 
 
 class ExamAIAnalyzeResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     exam: str
     skill: str
     estimated_score: Optional[str] = None

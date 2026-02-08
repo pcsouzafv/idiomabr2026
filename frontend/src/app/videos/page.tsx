@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { videosApi } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 
 interface Video {
   id: number;
@@ -38,13 +39,10 @@ export default function VideosPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [selectedLevel, setSelectedLevel] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
-  useEffect(() => {
-    loadVideos();
-  }, [page, selectedLevel, selectedCategory]);
-
-  const loadVideos = async () => {
+  const loadVideos = useCallback(async () => {
     setLoading(true);
     try {
       const response = await videosApi.getVideos({
@@ -61,12 +59,16 @@ export default function VideosPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, selectedLevel, selectedCategory, searchQuery]);
+
+  useEffect(() => {
+    void loadVideos();
+  }, [loadVideos]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setPage(1);
-    loadVideos();
+    setSearchQuery(searchInput.trim());
   };
 
   const formatDuration = (seconds: number) => {
@@ -117,8 +119,8 @@ export default function VideosPage() {
                 <input
                   type="text"
                   placeholder="Buscar vídeos..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
@@ -194,10 +196,12 @@ export default function VideosPage() {
               >
                 {/* Thumbnail */}
                 <div className="relative aspect-video bg-gray-200">
-                  <img
+                  <Image
                     src={video.thumbnail_url}
                     alt={video.title}
                     className="w-full h-full object-cover"
+                    fill
+                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
                   />
                   {video.user_progress !== undefined && video.user_progress > 0 && (
                     <progress

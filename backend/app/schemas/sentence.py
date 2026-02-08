@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
@@ -63,6 +63,8 @@ class AITeacherRequest(BaseModel):
 
 
 class AITeacherResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     response: str
     model_used: str
     context_used: Optional[dict] = None
@@ -70,11 +72,10 @@ class AITeacherResponse(BaseModel):
 
 
 class AIConversationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
     id: int
     user_message: str
     ai_response: str
     model_used: Optional[str] = None
     created_at: datetime
-
-    class Config:
-        from_attributes = True

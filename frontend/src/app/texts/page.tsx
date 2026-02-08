@@ -17,13 +17,17 @@ interface StudyTextListItem {
 }
 
 export default function TextsPage() {
-  const { user, isLoading: authLoading } = useAuthStore();
+  const { user, isLoading: authLoading, fetchUser } = useAuthStore();
   const router = useRouter();
 
   const [items, setItems] = useState<StudyTextListItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedLevel, setSelectedLevel] = useState('');
   const [levels, setLevels] = useState<string[]>([]);
+
+  useEffect(() => {
+    void fetchUser();
+  }, [fetchUser]);
 
   useEffect(() => {
     if (!authLoading && !user) {

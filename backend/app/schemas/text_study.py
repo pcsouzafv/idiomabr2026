@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional, Literal, Any
 
 
@@ -25,6 +25,8 @@ class StudyTextAttemptCreate(BaseModel):
 
 
 class StudyTextAttemptResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     id: int
     text_id: int
     task: str

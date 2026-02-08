@@ -1,7 +1,7 @@
 """
 Schemas para o módulo de conversação com ElevenLabs
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -22,6 +22,8 @@ class VoiceListResponse(BaseModel):
 
 
 class TextToSpeechRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     """Request para conversão de texto em fala"""
     text: str = Field(..., description="Texto a ser convertido em fala", min_length=1, max_length=5000)
     voice_id: Optional[str] = Field(None, description="ID da voz (opcional)")

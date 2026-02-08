@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/authStore';
@@ -42,6 +42,17 @@ interface Sentence {
   category: string;
 }
 
+interface FilterOption {
+  value: string;
+  count: number;
+}
+
+interface FiltersData {
+  total: number;
+  levels: FilterOption[];
+  categories: FilterOption[];
+}
+
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -56,14 +67,18 @@ const QUICK_PROMPTS = [
 ];
 
 export default function SentencesPage() {
-  const { user, isLoading: authLoading } = useAuthStore();
+  const { user, isLoading: authLoading, fetchUser } = useAuthStore();
   const router = useRouter();
 
   const [sentences, setSentences] = useState<Sentence[]>([]);
+  const [filtersData, setFiltersData] = useState<FiltersData | null>(null);
   const [selectedSentence, setSelectedSentence] = useState<Sentence | null>(null);
+  const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [levelFilter, setLevelFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const [userMessage, setUserMessage] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -91,47 +106,30 @@ export default function SentencesPage() {
   }>(null);
 
   useEffect(() => {
+    void fetchUser();
+  }, [fetchUser]);
+
+  useEffect(() => {
     if (!authLoading && !user) {
       router.push('/login');
     }
   }, [user, authLoading, router]);
 
   useEffect(() => {
-    if (user) {
-      void loadSentences();
-    }
-  }, [user]);
-
-  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, isAskingAI, isAnalyzingSentence]);
 
   const levels = useMemo(
-    () =>
-      Array.from(new Set(sentences.map((s) => s.level).filter(Boolean))).sort((a, b) =>
-        a.localeCompare(b)
-      ),
-    [sentences]
+    () => filtersData?.levels ?? [],
+    [filtersData]
   );
 
   const categories = useMemo(
-    () =>
-      Array.from(new Set(sentences.map((s) => s.category).filter(Boolean))).sort((a, b) =>
-        a.localeCompare(b)
-      ),
-    [sentences]
+    () => filtersData?.categories ?? [],
+    [filtersData]
   );
 
-  const filteredSentences = useMemo(() => {
-    const query = searchTerm.trim().toLowerCase();
-    return sentences.filter((sentence) => {
-      const matchesLevel = levelFilter === 'all' || sentence.level === levelFilter;
-      const matchesCategory = categoryFilter === 'all' || sentence.category === categoryFilter;
-      const haystack = `${sentence.english} ${sentence.portuguese} ${sentence.category} ${sentence.level}`.toLowerCase();
-      const matchesSearch = !query || haystack.includes(query);
-      return matchesLevel && matchesCategory && matchesSearch;
-    });
-  }, [sentences, searchTerm, levelFilter, categoryFilter]);
+  const filteredSentences = sentences;
 
   const cleanupMedia = () => {
     try {
@@ -158,16 +156,80 @@ export default function SentencesPage() {
     setAudioLevel(0);
   };
 
-  const loadSentences = async () => {
-    setIsLoading(true);
+  const PAGE_SIZE = 50;
+
+  const loadFilters = useCallback(async () => {
     try {
-      const response = await api.get('/api/sentences/', { params: { limit: 80 } });
-      setSentences(response.data);
+      const params: Record<string, string> = {};
+      if (levelFilter !== 'all') params.level = levelFilter;
+      if (categoryFilter !== 'all') params.category = categoryFilter;
+      const response = await api.get('/api/sentences/filters', { params });
+      setFiltersData(response.data);
+    } catch (error) {
+      console.error('Erro ao carregar filtros:', error);
+    }
+  }, [levelFilter, categoryFilter]);
+
+  const loadSentences = useCallback(async (
+    options?: { append?: boolean; offset?: number }
+  ) => {
+    const append = options?.append ?? false;
+    const offset = options?.offset ?? 0;
+    if (!append) {
+      setIsLoading(true);
+    } else {
+      setLoadingMore(true);
+    }
+    try {
+      const params: Record<string, string | number> = {
+        limit: PAGE_SIZE,
+        skip: append ? offset : 0,
+        mode: 'all',
+      };
+      if (levelFilter !== 'all') params.level = levelFilter;
+      if (categoryFilter !== 'all') params.category = categoryFilter;
+      if (searchTerm) params.search = searchTerm;
+
+      const response = await api.get('/api/sentences/', { params });
+      const data: Sentence[] = response.data;
+
+      if (append) {
+        setSentences((prev) => [...prev, ...data]);
+      } else {
+        setSentences(data);
+      }
+      setHasMore(data.length >= PAGE_SIZE);
     } catch (error) {
       console.error('Erro:', error);
       toast.error('Erro ao carregar frases');
     } finally {
       setIsLoading(false);
+      setLoadingMore(false);
+    }
+  }, [categoryFilter, levelFilter, searchTerm]);
+
+  // Debounced search keeps typing responsive and avoids excessive requests.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const normalizedSearch = searchInput.trim();
+      setSearchTerm((prev) => (prev === normalizedSearch ? prev : normalizedSearch));
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    if (!user) return;
+    void loadFilters();
+  }, [user, loadFilters]);
+
+  useEffect(() => {
+    if (!user) return;
+    void loadSentences();
+  }, [user, loadSentences]);
+
+  const loadMore = () => {
+    if (!loadingMore && hasMore) {
+      void loadSentences({ append: true, offset: sentences.length });
     }
   };
 
@@ -430,7 +492,7 @@ export default function SentencesPage() {
             <div className="grid grid-cols-3 gap-2 mb-4">
               <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
                 <p className="text-xs text-gray-500">Total</p>
-                <p className="text-base font-bold text-gray-900">{sentences.length}</p>
+                <p className="text-base font-bold text-gray-900">{filtersData?.total ?? sentences.length}</p>
               </div>
               <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
                 <p className="text-xs text-gray-500">Níveis</p>
@@ -447,8 +509,8 @@ export default function SentencesPage() {
                 <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
                   placeholder="Buscar por inglês, português, nível ou categoria..."
                   className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
                 />
@@ -458,28 +520,30 @@ export default function SentencesPage() {
                 <div className="relative">
                   <SlidersHorizontal className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <select
+                    title="Filtrar por nível"
                     value={levelFilter}
                     onChange={(event) => setLevelFilter(event.target.value)}
                     className="w-full appearance-none pl-9 pr-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
                   >
                     <option value="all">Todos os níveis</option>
-                    {levels.map((level) => (
-                      <option key={level} value={level}>
-                        {level}
+                    {levels.map((lv) => (
+                      <option key={lv.value} value={lv.value}>
+                        {lv.value} ({lv.count})
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <select
+                  title="Filtrar por categoria"
                   value={categoryFilter}
                   onChange={(event) => setCategoryFilter(event.target.value)}
                   className="w-full appearance-none px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
                 >
                   <option value="all">Todas as categorias</option>
-                  {categories.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
+                  {categories.map((cat) => (
+                    <option key={cat.value} value={cat.value}>
+                      {cat.value} ({cat.count})
                     </option>
                   ))}
                 </select>
@@ -529,6 +593,23 @@ export default function SentencesPage() {
                     <p className="text-sm text-gray-600 mt-1 leading-snug">{sentence.portuguese}</p>
                   </div>
                 ))}
+
+                {hasMore && (
+                  <button
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="w-full py-2.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {loadingMore ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Carregando...
+                      </>
+                    ) : (
+                      `Carregar mais frases (${sentences.length} de ${filtersData?.total ?? '...'})`
+                    )}
+                  </button>
+                )}
               </div>
             )}
           </section>

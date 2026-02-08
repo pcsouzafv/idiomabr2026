@@ -67,10 +67,12 @@ services:
       dockerfile: Dockerfile
       args:
         - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-https://api.idiomasbr.com}
+        - NEXT_PUBLIC_STT_WS_URL=${NEXT_PUBLIC_STT_WS_URL:-}
     container_name: idiomasbr-frontend
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.idiomasbr.com}
+      NEXT_PUBLIC_STT_WS_URL: ${NEXT_PUBLIC_STT_WS_URL:-}
       PORT: 3000
     depends_on:
       - backend

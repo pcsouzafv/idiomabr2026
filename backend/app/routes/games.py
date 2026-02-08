@@ -323,6 +323,49 @@ async def _generate_grammar_tip_explanation(
     return fallback_tip, fallback_explanation
 
 
+async def _generate_sentence_pt_ai(
+    *,
+    sentence_en: str,
+    sentence_pt: str,
+    level: Optional[str],
+    category: Optional[str],
+    db: Session,
+    sentence_id: int,
+) -> str:
+    system_prompt = (
+        "You are a Brazilian Portuguese teacher. Rewrite/translate the sentence "
+        "into natural pt-BR for learners. Keep it short, simple, and faithful. "
+        "Return JSON only with key: sentence_pt."
+    )
+
+    user_prompt = (
+        f"Sentence (EN): {sentence_en}\n"
+        f"Current PT (may be wrong): {sentence_pt}\n"
+        f"CEFR level: {level or 'unknown'}\n"
+        f"Topic: {category or 'general'}\n\n"
+        "Return JSON only."
+    )
+
+    try:
+        ai = await ai_teacher_service.get_ai_response_messages_prefer_deepseek(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            db=db,
+            cache_operation="sentence_builder.pt.v1",
+            cache_scope=f"sentence:{sentence_id}",
+        )
+        data = _extract_json_object(ai.get("response", "")) or {}
+        candidate = str(data.get("sentence_pt") or "").strip()
+        if candidate:
+            return candidate
+    except Exception as exc:
+        print(f"[WARN] Sentence PT AI failed: {exc}")
+
+    return sentence_pt
+
+
 GRAMMAR_SENTENCES = [
     {
         "id": "g1",
@@ -694,7 +737,7 @@ def submit_quiz(
 
 
 @router.post("/sentence-builder/start", response_model=SentenceBuilderSessionResponse)
-def start_sentence_builder(
+async def start_sentence_builder(
     num_sentences: int = 5,
     level: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -740,6 +783,14 @@ def start_sentence_builder(
         sentence_pt = _sanitize_sentence_pt(s.portuguese or "")
         if not sentence_pt:
             continue
+        sentence_pt = await _generate_sentence_pt_ai(
+            sentence_en=sentence_en,
+            sentence_pt=sentence_pt,
+            level=s.level,
+            category=s.category,
+            db=db,
+            sentence_id=s.id,
+        )
         tokens = _tokenize_sentence_builder(sentence_en)
 
         # Evitar frases muito curtas ou longas demais para o nível.

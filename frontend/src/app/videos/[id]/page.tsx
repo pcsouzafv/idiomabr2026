@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { videosApi } from '@/lib/api';
 import Link from 'next/link';
@@ -39,36 +39,25 @@ export default function VideoPlayerPage() {
   const [video, setVideo] = useState<Video | null>(null);
   const [loading, setLoading] = useState(true);
   const watchedSecondsRef = useRef(0);
-  const progressInterval = useRef<NodeJS.Timeout | null>(null);
+  const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    if (params.id) {
-      loadVideo(Number(params.id));
-    }
+  const updateProgress = useCallback(async (videoId: number, seconds: number, duration: number) => {
+    if (!duration) return;
 
-    return () => {
-      if (progressInterval.current) {
-        clearInterval(progressInterval.current);
-      }
-    };
-  }, [params.id]);
+    const percentage = Math.min(100, Math.round((seconds / duration) * 100));
 
-  const loadVideo = async (id: number) => {
-    setLoading(true);
     try {
-      const response = await videosApi.getVideo(id);
-      setVideo(response.data);
-
-      // Iniciar rastreamento de progresso
-      startProgressTracking(response.data.duration);
+      await videosApi.updateProgress({
+        video_id: videoId,
+        watched_duration: seconds,
+        completion_percentage: percentage,
+      });
     } catch (error) {
-      console.error('Erro ao carregar vídeo:', error);
-    } finally {
-      setLoading(false);
+      console.error('Erro ao atualizar progresso:', error);
     }
-  };
+  }, []);
 
-  const startProgressTracking = (duration: number) => {
+  const startProgressTracking = useCallback((videoId: number, duration: number) => {
     if (progressInterval.current) {
       clearInterval(progressInterval.current);
     }
@@ -77,25 +66,37 @@ export default function VideoPlayerPage() {
     // Atualizar progresso a cada 5 segundos
     progressInterval.current = setInterval(() => {
       watchedSecondsRef.current += 5;
-      updateProgress(watchedSecondsRef.current, duration);
+      void updateProgress(videoId, watchedSecondsRef.current, duration);
     }, 5000);
-  };
+  }, [updateProgress]);
 
-  const updateProgress = async (seconds: number, duration: number) => {
-    if (!video || !duration) return;
-
-    const percentage = Math.min(100, Math.round((seconds / duration) * 100));
-
+  const loadVideo = useCallback(async (id: number) => {
+    setLoading(true);
     try {
-      await videosApi.updateProgress({
-        video_id: video.id,
-        watched_duration: seconds,
-        completion_percentage: percentage,
-      });
+      const response = await videosApi.getVideo(id);
+      const loadedVideo: Video = response.data;
+      setVideo(loadedVideo);
+
+      // Iniciar rastreamento de progresso
+      startProgressTracking(loadedVideo.id, loadedVideo.duration);
     } catch (error) {
-      console.error('Erro ao atualizar progresso:', error);
+      console.error('Erro ao carregar vídeo:', error);
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [startProgressTracking]);
+
+  useEffect(() => {
+    if (params.id) {
+      void loadVideo(Number(params.id));
+    }
+
+    return () => {
+      if (progressInterval.current) {
+        clearInterval(progressInterval.current);
+      }
+    };
+  }, [loadVideo, params.id]);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('pt-BR', {

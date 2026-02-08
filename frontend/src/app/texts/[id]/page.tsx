@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
@@ -31,7 +31,7 @@ interface AttemptResponse {
 }
 
 export default function TextDetailPage() {
-  const { user, isLoading: authLoading } = useAuthStore();
+  const { user, isLoading: authLoading, fetchUser } = useAuthStore();
   const router = useRouter();
   const params = useParams();
 
@@ -60,6 +60,10 @@ export default function TextDetailPage() {
   });
 
   useEffect(() => {
+    void fetchUser();
+  }, [fetchUser]);
+
+  useEffect(() => {
     if (!shadowingRunning) return;
     const id = window.setInterval(() => {
       setShadowingSeconds((s) => s + 1);
@@ -79,13 +83,7 @@ export default function TextDetailPage() {
     }
   }, [user, authLoading, router]);
 
-  useEffect(() => {
-    if (user && Number.isFinite(textId) && textId > 0) {
-      load();
-    }
-  }, [user, textId]);
-
-  const load = async () => {
+  const load = useCallback(async () => {
     setIsLoading(true);
     try {
       const res = await api.get(`/api/texts/${textId}`);
@@ -97,7 +95,13 @@ export default function TextDetailPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [router, textId]);
+
+  useEffect(() => {
+    if (user && Number.isFinite(textId) && textId > 0) {
+      void load();
+    }
+  }, [user, textId, load]);
 
   const submit = async () => {
     if (!userText.trim()) return;

@@ -39,6 +39,7 @@ export default function WordsPage() {
   const router = useRouter();
 
   const [words, setWords] = useState<Word[]>([]);
+  const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedLevel, setSelectedLevel] = useState('');
   const [levels, setLevels] = useState<string[]>([]);
@@ -96,17 +97,15 @@ export default function WordsPage() {
     }
   }, [user, loadWords]);
 
-  // Debounce search
+  // Debounced search keeps typing responsive without flooding the API.
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (user) {
-        setCurrentPage(1);
-        loadWords();
-      }
+      const normalizedSearch = searchInput.trim();
+      setCurrentPage(1);
+      setSearchTerm((prev) => (prev === normalizedSearch ? prev : normalizedSearch));
     }, 300);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm, selectedLevel]);
+  }, [searchInput]);
 
   const speakWord = (text: string) => {
     if ('speechSynthesis' in window) {
@@ -155,8 +154,8 @@ export default function WordsPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
               <input
                 type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 placeholder="Buscar palavra em inglês ou português..."
                 className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
               />
@@ -167,7 +166,10 @@ export default function WordsPage() {
               <Filter className="h-5 w-5 text-gray-400" />
               <select
                 value={selectedLevel}
-                onChange={(e) => setSelectedLevel(e.target.value)}
+                onChange={(e) => {
+                  setSelectedLevel(e.target.value);
+                  setCurrentPage(1);
+                }}
                 className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 aria-label="Filtrar por nível"
               >
