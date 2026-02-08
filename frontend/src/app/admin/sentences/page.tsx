@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import axios from "axios";
@@ -17,6 +17,22 @@ interface Sentence {
   difficulty_score?: number;
 }
 
+type AxiosLikeError = {
+  response?: {
+    data?: {
+      detail?: string;
+    };
+  };
+};
+
+function getErrorDetail(error: unknown): string | undefined {
+  if (typeof error === "object" && error !== null && "response" in error) {
+    const detail = (error as AxiosLikeError).response?.data?.detail;
+    if (typeof detail === "string") return detail;
+  }
+  return undefined;
+}
+
 export default function AdminSentencesPage() {
   const router = useRouter();
   const { user, token } = useAuthStore();
@@ -27,15 +43,7 @@ export default function AdminSentencesPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingSentence, setEditingSentence] = useState<Sentence | null>(null);
 
-  useEffect(() => {
-    if (!user?.is_admin) {
-      router.push("/dashboard");
-      return;
-    }
-    loadSentences();
-  }, [user, page]);
-
-  const loadSentences = async () => {
+  const loadSentences = useCallback(async () => {
     try {
       setLoading(true);
       const response = await axios.get(
@@ -49,7 +57,15 @@ export default function AdminSentencesPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, token]);
+
+  useEffect(() => {
+    if (!user?.is_admin) {
+      router.push("/dashboard");
+      return;
+    }
+    void loadSentences();
+  }, [user, router, loadSentences]);
 
   const handleDelete = async (id: number) => {
     if (!confirm("Tem certeza que deseja deletar esta sentença?")) return;
@@ -59,7 +75,7 @@ export default function AdminSentencesPage() {
         `${process.env.NEXT_PUBLIC_API_URL}/api/admin/sentences/${id}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      loadSentences();
+      void loadSentences();
     } catch (error) {
       console.error("Erro ao deletar sentença:", error);
       alert("Erro ao deletar sentença");
@@ -85,10 +101,10 @@ export default function AdminSentencesPage() {
       }
       setShowModal(false);
       setEditingSentence(null);
-      loadSentences();
-    } catch (error: any) {
+      void loadSentences();
+    } catch (error: unknown) {
       console.error("Erro ao salvar sentença:", error);
-      alert(error.response?.data?.detail || "Erro ao salvar sentença");
+      alert(getErrorDetail(error) || "Erro ao salvar sentença");
     }
   };
 
@@ -171,7 +187,7 @@ export default function AdminSentencesPage() {
           ) : sentences.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-gray-600 text-lg">Nenhuma sentença encontrada</p>
-              <p className="text-gray-500 mt-2">Clique em "Nova Sentença" para adicionar a primeira</p>
+              <p className="text-gray-500 mt-2">Clique em &quot;Nova Sentença&quot; para adicionar a primeira</p>
             </div>
           ) : (
             <>

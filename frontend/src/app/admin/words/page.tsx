@@ -1,10 +1,26 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
 import { useAuthStore } from "@/store/authStore";
 import toast from "react-hot-toast";
+
+type AxiosLikeError = {
+  response?: {
+    data?: {
+      detail?: string;
+    };
+  };
+};
+
+function getErrorDetail(error: unknown): string | undefined {
+  if (typeof error === "object" && error !== null && "response" in error) {
+    const detail = (error as AxiosLikeError).response?.data?.detail;
+    if (typeof detail === "string") return detail;
+  }
+  return undefined;
+}
 
 interface Word {
   id: number;
@@ -31,6 +47,7 @@ export default function AdminWordsPage() {
   const [words, setWords] = useState<Word[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [levelFilter, setLevelFilter] = useState("");
   const [showModal, setShowModal] = useState(false);
@@ -38,15 +55,7 @@ export default function AdminWordsPage() {
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (!user?.is_admin) {
-      router.push("/dashboard");
-      return;
-    }
-    loadWords();
-  }, [user, page, search, levelFilter]);
-
-  const loadWords = async () => {
+  const loadWords = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({
@@ -61,12 +70,31 @@ export default function AdminWordsPage() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setWords(response.data);
-    } catch (error) {
+    } catch {
       toast.error("Erro ao carregar palavras");
     } finally {
       setLoading(false);
     }
-  };
+  }, [levelFilter, page, search, token]);
+
+  useEffect(() => {
+    if (!user?.is_admin) {
+      router.push("/dashboard");
+      return;
+    }
+    void loadWords();
+  }, [user, router, loadWords]);
+
+  // Debounced search avoids request spam while typing.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const normalizedSearch = searchInput.trim();
+      setPage(1);
+      setSearch((prev) => (prev === normalizedSearch ? prev : normalizedSearch));
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   const handleDelete = async (id: number) => {
     if (!confirm("Tem certeza que deseja deletar esta palavra?")) return;
@@ -78,7 +106,7 @@ export default function AdminWordsPage() {
       );
       toast.success("Palavra deletada com sucesso!");
       loadWords();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao deletar palavra");
     }
   };
@@ -105,8 +133,8 @@ export default function AdminWordsPage() {
       setShowModal(false);
       setEditingWord(null);
       loadWords();
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Erro ao salvar palavra");
+    } catch (error: unknown) {
+      toast.error(getErrorDetail(error) || "Erro ao salvar palavra");
     }
   };
 
@@ -130,7 +158,7 @@ export default function AdminWordsPage() {
         }
       );
 
-      const { created, updated, errors, total_processed } = response.data;
+      const { created, updated, errors } = response.data;
 
       if (errors.length > 0) {
         toast.error(`Importado com erros: ${created} criadas, ${updated} atualizadas, ${errors.length} erros`);
@@ -140,8 +168,8 @@ export default function AdminWordsPage() {
       }
 
       loadWords();
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Erro ao importar CSV");
+    } catch (error: unknown) {
+      toast.error(getErrorDetail(error) || "Erro ao importar CSV");
     } finally {
       setImporting(false);
       if (fileInputRef.current) {
@@ -256,13 +284,16 @@ house,haʊs,casa,A1,noun,A building for living,Um edifício para morar,This is m
             <input
               type="text"
               placeholder="Buscar palavra..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               className="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
             <select
               value={levelFilter}
-              onChange={(e) => setLevelFilter(e.target.value)}
+              onChange={(e) => {
+                setPage(1);
+                setLevelFilter(e.target.value);
+              }}
               title="Filtrar por nível"
               aria-label="Filtrar por nível"
               className="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -277,8 +308,10 @@ house,haʊs,casa,A1,noun,A building for living,Um edifício para morar,This is m
             </select>
             <button
               onClick={() => {
+                setSearchInput("");
                 setSearch("");
                 setLevelFilter("");
+                setPage(1);
               }}
               className="bg-gray-200 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors"
             >
@@ -432,8 +465,8 @@ function WordModal({
       );
       setFormData(response.data);
       toast.success("IA preencheu os campos faltantes!");
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Erro ao preencher com IA");
+    } catch (error: unknown) {
+      toast.error(getErrorDetail(error) || "Erro ao preencher com IA");
     } finally {
       setIsFillingAi(false);
     }

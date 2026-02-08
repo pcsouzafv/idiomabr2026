@@ -1,10 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import axios from "axios";
 import { useAuthStore } from "@/store/authStore";
+
+type AxiosLikeError = {
+  response?: {
+    data?: {
+      detail?: string;
+    };
+  };
+};
+
+function getErrorDetail(error: unknown): string | undefined {
+  if (typeof error === "object" && error !== null && "response" in error) {
+    const detail = (error as AxiosLikeError).response?.data?.detail;
+    if (typeof detail === "string") return detail;
+  }
+  return undefined;
+}
 
 interface User {
   id: number;
@@ -39,20 +55,13 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
-  useEffect(() => {
-    if (!user?.is_admin) {
-      router.push("/dashboard");
-      return;
-    }
-    loadUsers();
-  }, [user, page]);
-
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     try {
       setLoading(true);
       const searchParam = search ? `&search=${search}` : "";
@@ -67,11 +76,19 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, search, token]);
+
+  useEffect(() => {
+    if (!user?.is_admin) {
+      router.push("/dashboard");
+      return;
+    }
+    void loadUsers();
+  }, [user, router, loadUsers]);
 
   const handleSearch = () => {
     setPage(1);
-    loadUsers();
+    setSearch(searchInput.trim());
   };
 
   const toggleAdmin = async (userId: number, currentIsAdmin: boolean) => {
@@ -139,9 +156,9 @@ export default function AdminUsersPage() {
       setShowModal(false);
       setEditingUser(null);
       loadUsers();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Erro ao salvar usuário:", error);
-      alert(error.response?.data?.detail || "Erro ao salvar usuário");
+      alert(getErrorDetail(error) || "Erro ao salvar usuário");
     }
   };
 
@@ -155,9 +172,9 @@ export default function AdminUsersPage() {
       alert("Usuário criado com sucesso!");
       setShowCreateModal(false);
       loadUsers();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Erro ao criar usuário:", error);
-      alert(error.response?.data?.detail || "Erro ao criar usuário");
+      alert(getErrorDetail(error) || "Erro ao criar usuário");
     }
   };
 
@@ -190,9 +207,9 @@ export default function AdminUsersPage() {
           <div className="flex gap-3">
             <input
               type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
               placeholder="Buscar por nome ou email..."
               className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
@@ -204,7 +221,11 @@ export default function AdminUsersPage() {
             </button>
             {search && (
               <button
-                onClick={() => { setSearch(""); setPage(1); loadUsers(); }}
+                onClick={() => {
+                  setSearchInput("");
+                  setSearch("");
+                  setPage(1);
+                }}
                 className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-300 transition-colors"
               >
                 Limpar

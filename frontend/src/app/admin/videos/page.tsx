@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import axios from "axios";
 import { useAuthStore } from "@/store/authStore";
+import Image from "next/image";
 
 interface Video {
   id: number;
@@ -21,6 +22,22 @@ interface Video {
   is_featured: boolean;
 }
 
+type AxiosLikeError = {
+  response?: {
+    data?: {
+      detail?: string;
+    };
+  };
+};
+
+function getErrorDetail(error: unknown): string | undefined {
+  if (typeof error === "object" && error !== null && "response" in error) {
+    const detail = (error as AxiosLikeError).response?.data?.detail;
+    if (typeof detail === "string") return detail;
+  }
+  return undefined;
+}
+
 export default function AdminVideosPage() {
   const router = useRouter();
   const { user, token } = useAuthStore();
@@ -31,15 +48,7 @@ export default function AdminVideosPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingVideo, setEditingVideo] = useState<Video | null>(null);
 
-  useEffect(() => {
-    if (!user?.is_admin) {
-      router.push("/dashboard");
-      return;
-    }
-    loadVideos();
-  }, [user, page]);
-
-  const loadVideos = async () => {
+  const loadVideos = useCallback(async () => {
     try {
       setLoading(true);
       const response = await axios.get(
@@ -53,7 +62,15 @@ export default function AdminVideosPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, token]);
+
+  useEffect(() => {
+    if (!user?.is_admin) {
+      router.push("/dashboard");
+      return;
+    }
+    void loadVideos();
+  }, [user, router, loadVideos]);
 
   const handleDelete = async (id: number) => {
     if (!confirm("Tem certeza que deseja deletar este vídeo?")) return;
@@ -63,7 +80,7 @@ export default function AdminVideosPage() {
         `${process.env.NEXT_PUBLIC_API_URL}/api/admin/videos/${id}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      loadVideos();
+      void loadVideos();
     } catch (error) {
       console.error("Erro ao deletar vídeo:", error);
       alert("Erro ao deletar vídeo");
@@ -89,10 +106,10 @@ export default function AdminVideosPage() {
       }
       setShowModal(false);
       setEditingVideo(null);
-      loadVideos();
-    } catch (error: any) {
+      void loadVideos();
+    } catch (error: unknown) {
       console.error("Erro ao salvar vídeo:", error);
-      alert(error.response?.data?.detail || "Erro ao salvar vídeo");
+      alert(getErrorDetail(error) || "Erro ao salvar vídeo");
     }
   };
 
@@ -173,7 +190,7 @@ export default function AdminVideosPage() {
           ) : videos.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-gray-600 text-lg">Nenhum vídeo encontrado</p>
-              <p className="text-gray-500 mt-2">Clique em "Adicionar Vídeo" para adicionar o primeiro</p>
+              <p className="text-gray-500 mt-2">Clique em &quot;Adicionar Vídeo&quot; para adicionar o primeiro</p>
             </div>
           ) : (
             <>
@@ -186,7 +203,13 @@ export default function AdminVideosPage() {
                   <div key={video.id} className="border border-gray-200 rounded-lg overflow-hidden hover:shadow-lg transition-shadow">
                     <div className="relative h-48 bg-gray-200">
                       {video.thumbnail_url ? (
-                        <img src={video.thumbnail_url} alt={video.title} className="w-full h-full object-cover" />
+                        <Image
+                          src={video.thumbnail_url}
+                          alt={video.title}
+                          className="w-full h-full object-cover"
+                          fill
+                          sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                        />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-gray-400">🎥 Sem thumbnail</div>
                       )}

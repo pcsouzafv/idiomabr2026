@@ -1,11 +1,27 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import axios from "axios";
 import toast from "react-hot-toast";
 import { useAuthStore } from "@/store/authStore";
+
+type AxiosLikeError = {
+  response?: {
+    data?: {
+      detail?: string;
+    };
+  };
+};
+
+function getErrorDetail(error: unknown): string | undefined {
+  if (typeof error === "object" && error !== null && "response" in error) {
+    const detail = (error as AxiosLikeError).response?.data?.detail;
+    if (typeof detail === "string") return detail;
+  }
+  return undefined;
+}
 
 interface StudyTextAdminListItem {
   id: number;
@@ -23,7 +39,7 @@ interface StudyTextAdminDetail {
   content_en: string;
   content_pt?: string | null;
   audio_url?: string | null;
-  tags?: any;
+  tags?: unknown;
   created_at: string;
   updated_at: string;
 }
@@ -45,6 +61,7 @@ export default function AdminTextsPage() {
   const [items, setItems] = useState<StudyTextAdminListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [levelFilter, setLevelFilter] = useState("");
 
@@ -64,21 +81,12 @@ export default function AdminTextsPage() {
   const firstFieldRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!user?.is_admin) {
-      router.push("/dashboard");
-      return;
-    }
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, page, search, levelFilter]);
-
-  useEffect(() => {
     if (showModal) {
       setTimeout(() => firstFieldRef.current?.focus(), 0);
     }
   }, [showModal]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({
@@ -99,7 +107,26 @@ export default function AdminTextsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [levelFilter, page, search, token]);
+
+  useEffect(() => {
+    if (!user?.is_admin) {
+      router.push("/dashboard");
+      return;
+    }
+    void load();
+  }, [user, router, load]);
+
+  // Debounced search avoids one request per keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const normalizedSearch = searchInput.trim();
+      setPage(1);
+      setSearch((prev) => (prev === normalizedSearch ? prev : normalizedSearch));
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   const openCreate = () => {
     setEditingId(null);
@@ -200,8 +227,8 @@ export default function AdminTextsPage() {
       setForm((s) => ({ ...s, audio_url: updated.audio_url || "" }));
       toast.success("Áudio gerado!");
       load();
-    } catch (e: any) {
-      const msg = e?.response?.data?.detail;
+    } catch (e: unknown) {
+      const msg = getErrorDetail(e);
       toast.error(typeof msg === "string" ? msg : "Erro ao gerar áudio");
       console.error(e);
     } finally {
@@ -253,10 +280,9 @@ export default function AdminTextsPage() {
           <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between mb-4">
             <input
               aria-label="Buscar textos"
-              value={search}
+              value={searchInput}
               onChange={(e) => {
-                setPage(1);
-                setSearch(e.target.value);
+                setSearchInput(e.target.value);
               }}
               placeholder="Buscar por título ou conteúdo (EN)"
               className="w-full md:max-w-md px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"

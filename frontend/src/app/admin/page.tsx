@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import axios from "axios";
@@ -42,6 +42,14 @@ interface AdminPerformanceReport {
   users: AdminUserPerformance[];
 }
 
+interface StatCardProps {
+  title: string;
+  value: number | string;
+  subtitle: string;
+  icon: string;
+  color: string;
+}
+
 export default function AdminDashboard() {
   const router = useRouter();
   const { user, token } = useAuthStore();
@@ -49,17 +57,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"overview" | "words" | "sentences" | "videos" | "users" | "reading_writing" | "performance">("overview");
 
-  useEffect(() => {
-    // Verificar se é admin
-    if (!user?.is_admin) {
-      router.push("/dashboard");
-      return;
-    }
-
-    loadStats();
-  }, [user, router]);
-
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     try {
       const response = await axios.get(
         `${process.env.NEXT_PUBLIC_API_URL}/api/admin/stats`,
@@ -73,7 +71,17 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
+
+  useEffect(() => {
+    // Verificar se é admin
+    if (!user?.is_admin) {
+      router.push("/dashboard");
+      return;
+    }
+
+    void loadStats();
+  }, [user, router, loadStats]);
 
   if (!user?.is_admin) {
     return (
@@ -193,10 +201,10 @@ export default function AdminDashboard() {
             {activeTab === "overview" && stats && (
               <OverviewTab stats={stats} />
             )}
-            {activeTab === "words" && <WordsTab token={token!} />}
-            {activeTab === "sentences" && <SentencesTab token={token!} />}
-            {activeTab === "videos" && <VideosTab token={token!} />}
-            {activeTab === "users" && <UsersTab token={token!} />}
+            {activeTab === "words" && <WordsTab />}
+            {activeTab === "sentences" && <SentencesTab />}
+            {activeTab === "videos" && <VideosTab />}
+            {activeTab === "users" && <UsersTab />}
             {activeTab === "reading_writing" && <ReadingWritingTab />}
             {activeTab === "performance" && <PerformanceTab token={token!} />}
           </div>
@@ -272,7 +280,7 @@ function OverviewTab({ stats }: { stats: AdminStats }) {
   );
 }
 
-function StatCard({ title, value, subtitle, icon, color }: any) {
+function StatCard({ title, value, subtitle, icon, color }: StatCardProps) {
   const borderClass =
     color === "bg-blue-500"
       ? "border-blue-500"
@@ -308,11 +316,7 @@ function PerformanceTab({ token }: { token: string }) {
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(30);
 
-  useEffect(() => {
-    loadReport();
-  }, [days]);
-
-  const loadReport = async () => {
+  const loadReport = useCallback(async () => {
     try {
       setLoading(true);
       const response = await axios.get(
@@ -328,7 +332,11 @@ function PerformanceTab({ token }: { token: string }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [days, token]);
+
+  useEffect(() => {
+    void loadReport();
+  }, [loadReport]);
 
   if (loading) {
     return (
@@ -433,7 +441,7 @@ function PerformanceTab({ token }: { token: string }) {
 }
 
 // ============== TAB: PALAVRAS ==============
-function WordsTab({ token }: { token: string }) {
+function WordsTab() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -453,7 +461,7 @@ function WordsTab({ token }: { token: string }) {
 }
 
 // ============== TAB: SENTENÇAS ==============
-function SentencesTab({ token }: { token: string }) {
+function SentencesTab() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -473,7 +481,7 @@ function SentencesTab({ token }: { token: string }) {
 }
 
 // ============== TAB: VÍDEOS ==============
-function VideosTab({ token }: { token: string }) {
+function VideosTab() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -493,7 +501,7 @@ function VideosTab({ token }: { token: string }) {
 }
 
 // ============== TAB: USUÁRIOS ==============
-function UsersTab({ token }: { token: string }) {
+function UsersTab() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">

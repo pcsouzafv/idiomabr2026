@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { videosApi } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
+import Image from 'next/image';
 
 interface Video {
   id: number;
@@ -21,6 +22,22 @@ interface Video {
   is_featured: boolean;
   order_index: number;
   created_at: string;
+}
+
+type AxiosLikeError = {
+  response?: {
+    data?: {
+      detail?: string;
+    };
+  };
+};
+
+function getErrorDetail(error: unknown): string | undefined {
+  if (typeof error === 'object' && error !== null && 'response' in error) {
+    const detail = (error as AxiosLikeError).response?.data?.detail;
+    if (typeof detail === 'string') return detail;
+  }
+  return undefined;
 }
 
 const CATEGORIES = {
@@ -109,9 +126,9 @@ export default function VideoAdminPage() {
 
       resetForm();
       loadVideos();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Erro ao salvar vídeo:', error);
-      setError(error.response?.data?.detail || 'Erro ao salvar vídeo');
+      setError(getErrorDetail(error) || 'Erro ao salvar vídeo');
     }
   };
 
@@ -491,10 +508,12 @@ export default function VideoAdminPage() {
                   <tr key={video.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
                       <div className="flex items-center">
-                        <img
+                        <Image
                           src={video.thumbnail_url}
                           alt={video.title}
                           className="h-12 w-20 rounded object-cover"
+                          width={80}
+                          height={48}
                         />
                         <div className="ml-4">
                           <div className="text-sm font-medium text-gray-900">

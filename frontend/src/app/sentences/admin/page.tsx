@@ -35,7 +35,7 @@ const CATEGORIES = [
 
 export default function SentencesAdminPage() {
   const router = useRouter();
-  const { user, isLoading: authLoading } = useAuthStore();
+  const { user, isLoading: authLoading, fetchUser } = useAuthStore();
 
   const [sentences, setSentences] = useState<Sentence[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -51,6 +51,10 @@ export default function SentencesAdminPage() {
     grammar_points: '',
     vocabulary_used: ''
   });
+
+  useEffect(() => {
+    void fetchUser();
+  }, [fetchUser]);
 
   useEffect(() => {
     if (!authLoading && !user) {
