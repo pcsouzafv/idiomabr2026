@@ -42,6 +42,7 @@ OPENAI_API_KEY_SECRET_NAME="${OPENAI_API_KEY_SECRET_NAME:-idiomasbr-openai-api-k
 DEEPSEEK_API_KEY_SECRET_NAME="${DEEPSEEK_API_KEY_SECRET_NAME:-idiomasbr-deepseek-api-key}"
 USE_OLLAMA_FALLBACK_ENV="${USE_OLLAMA_FALLBACK_ENV:-false}"
 OLLAMA_URL_ENV="${OLLAMA_URL_ENV:-}"
+FRONTEND_BASE_URL_ENV="${FRONTEND_BASE_URL_ENV:-https://idiomasbr.com}"
 
 # Se true e os secrets de IA não existirem, cria a partir das variáveis de ambiente
 # OPENAI_API_KEY / DEEPSEEK_API_KEY (do seu terminal). Não grava nada no repositório.
@@ -245,7 +246,7 @@ if [[ "$USE_SECRET_MANAGER" == "true" ]]; then
         --allow-unauthenticated \
         --add-cloudsql-instances "$CLOUDSQL_CONNECTION_NAME" \
         --set-secrets "DATABASE_URL=$DATABASE_URL_SECRET_NAME:latest,SECRET_KEY=$SECRET_KEY_SECRET_NAME:latest$AI_SECRETS_CSV" \
-        --set-env-vars "ALGORITHM=HS256,ACCESS_TOKEN_EXPIRE_MINUTES=10080,DEBUG=false,USE_OLLAMA_FALLBACK=$USE_OLLAMA_FALLBACK_ENV$OLLAMA_ENV_CSV"
+        --set-env-vars "ENVIRONMENT=production,ALGORITHM=HS256,ACCESS_TOKEN_EXPIRE_MINUTES=10080,DEBUG=false,AUTH_REQUIRE_EMAIL_VERIFICATION=true,FRONTEND_BASE_URL=$FRONTEND_BASE_URL_ENV,USE_OLLAMA_FALLBACK=$USE_OLLAMA_FALLBACK_ENV$OLLAMA_ENV_CSV"
 else
     echo "⚠️ USE_SECRET_MANAGER=false: você precisa definir DATABASE_URL e SECRET_KEY via --set-env-vars manualmente."
     echo "   Recomendo fortemente usar Secret Manager para produção."

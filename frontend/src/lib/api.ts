@@ -36,7 +36,13 @@ api.interceptors.response.use(
 
 // Auth
 export const authApi = {
-  register: (data: { email: string; name: string; password: string; phone_number: string }) =>
+  register: (data: {
+    email: string;
+    name: string;
+    password: string;
+    phone_number: string;
+    captcha_token?: string;
+  }) =>
     api.post('/api/auth/register', data),
   
   login: (data: { username: string; password: string }) => {
@@ -61,6 +67,28 @@ export const authApi = {
 
   resetPassword: (data: { token: string; new_password: string }) =>
     api.post('/api/auth/reset-password', data),
+
+  verifyEmail: (token: string) =>
+    api.get('/api/auth/verify-email', { params: { token } }),
+
+  resendVerification: (data: { email: string }) =>
+    api.post('/api/auth/resend-verification', data),
+};
+
+export const supportApi = {
+  contact: (data: {
+    subject: string;
+    message: string;
+    category?: string;
+    context_url?: string;
+  }) => api.post('/api/support/contact', data),
+
+  sendToStudent: (data: {
+    to_email: string;
+    subject: string;
+    message: string;
+    reply_to?: string;
+  }) => api.post('/api/support/send', data),
 };
 
 // Words

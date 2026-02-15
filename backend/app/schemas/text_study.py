@@ -19,6 +19,18 @@ class StudyTextDetail(BaseModel):
     tags: Optional[Any] = None
 
 
+class StudyTextWordTiming(BaseModel):
+    index: int
+    word: str
+    start: float
+    end: float
+
+
+class StudyTextAudioAlignmentResponse(BaseModel):
+    source: Literal["transcription_words", "transcription_segments", "none"] = "none"
+    word_timings: List[StudyTextWordTiming] = Field(default_factory=list)
+
+
 class StudyTextAttemptCreate(BaseModel):
     task: Literal["writing", "summary", "translation"] = "writing"
     user_text: str = Field(min_length=1)

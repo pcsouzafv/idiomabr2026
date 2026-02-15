@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
+from app.models.progress import UserProgress
 from app.models.gamification import (
     UserStats, Achievement, UserAchievement, 
     DailyChallenge, UserDailyChallenge, GameSession
@@ -51,6 +52,39 @@ def get_my_stats(
 ):
     """Retorna estatísticas do usuário atual."""
     stats = get_or_create_stats(db, current_user.id)
+
+    # Sincroniza contadores derivados para evitar progresso de conquistas defasado.
+    learned_words_count = db.query(func.count(UserProgress.id)).filter(
+        UserProgress.user_id == current_user.id,
+        UserProgress.correct_count >= 3,
+    ).scalar() or 0
+
+    max_streak = max(int(stats.longest_streak or 0), int(current_user.current_streak or 0))
+
+    stats_changed = False
+    if int(stats.words_learned or 0) != int(learned_words_count):
+        stats.words_learned = int(learned_words_count)  # type: ignore[assignment]
+        stats_changed = True
+    if int(stats.longest_streak or 0) != max_streak:
+        stats.longest_streak = max_streak  # type: ignore[assignment]
+        stats_changed = True
+    if stats_changed:
+        db.commit()
+        db.refresh(stats)
+
+    # Garante que conquistas sejam avaliadas mesmo fora do fluxo de quiz.
+    from app.services.achievements import check_and_unlock_achievements
+
+    newly_unlocked = check_and_unlock_achievements(db, current_user.id)
+    if newly_unlocked:
+        db.refresh(stats)
+
+    perfect_games_count = db.query(func.count(GameSession.id)).filter(
+        GameSession.user_id == current_user.id,
+        GameSession.completed.is_(True),
+        GameSession.max_score > 0,
+        GameSession.score >= GameSession.max_score,
+    ).scalar() or 0
     
     # Calcular progresso para próximo nível
     current_level_xp = xp_for_level(stats.level)
@@ -73,6 +107,7 @@ def get_my_stats(
         best_quiz_score=stats.best_quiz_score,
         best_hangman_streak=stats.best_hangman_streak,
         best_matching_time=stats.best_matching_time,
+        perfect_games=int(perfect_games_count),
         xp_to_next_level=xp_needed - xp_in_level,
         level_progress=(xp_in_level / xp_needed) * 100 if xp_needed > 0 else 100
     )

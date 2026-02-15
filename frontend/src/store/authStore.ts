@@ -10,6 +10,7 @@ interface User {
   current_streak: number;
   last_study_date: string | null;
   is_admin?: boolean;
+  email_verified?: boolean;
 }
 
 interface ProgressStats {
@@ -32,7 +33,13 @@ interface AuthState {
   setUser: (user: User | null) => void;
   setToken: (token: string | null) => void;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, name: string, password: string, phoneNumber: string) => Promise<void>;
+  register: (
+    email: string,
+    name: string,
+    password: string,
+    phoneNumber: string,
+    captchaToken?: string
+  ) => Promise<{ requiresEmailVerification: boolean }>;
   logout: () => void;
   fetchUser: () => Promise<void>;
   fetchStats: () => Promise<void>;
@@ -66,8 +73,24 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ user: userResponse.data, isLoading: false });
   },
   
-  register: async (email: string, name: string, password: string, phoneNumber: string) => {
-    await authApi.register({ email, name, password, phone_number: phoneNumber });
+  register: async (
+    email: string,
+    name: string,
+    password: string,
+    phoneNumber: string,
+    captchaToken?: string
+  ) => {
+    const registerResponse = await authApi.register({
+      email,
+      name,
+      password,
+      phone_number: phoneNumber,
+      captcha_token: captchaToken,
+    });
+    if (registerResponse.data?.email_verified === false) {
+      return { requiresEmailVerification: true };
+    }
+
     // Após registro, fazer login automaticamente
     const loginResponse = await authApi.login({ username: email, password });
     const { access_token } = loginResponse.data;
@@ -77,6 +100,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     
     const userResponse = await authApi.getMe();
     set({ user: userResponse.data, isLoading: false });
+    return { requiresEmailVerification: false };
   },
   
   logout: () => {

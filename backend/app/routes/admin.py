@@ -5,8 +5,10 @@ Requer autenticação como admin (is_admin=True)
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Response
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, and_, Integer, cast
+from sqlalchemy import func, desc, and_, Integer, cast, inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime, timezone, timedelta
+import logging
 import os
 import json
 import hashlib
@@ -15,11 +17,13 @@ import io
 
 from app.core.database import get_db
 from app.core.security import require_admin, get_password_hash
+from app.core.config import get_settings
 from app.models.user import User
 from app.models.word import Word
 from app.models.sentence import Sentence
 from app.models.video import Video
 from app.models.review import Review
+from app.models.ai_usage import AIUsageLog
 from app.models.progress import UserProgress
 from app.models.text_study import StudyText
 from app.utils.text_sanitize import sanitize_unmatched_brackets
@@ -31,6 +35,11 @@ from app.schemas.admin import (
     AdminPerformanceReport,
     AdminPerformanceOverview,
     AdminUserPerformance,
+    AdminAIUsageReport,
+    AdminAIUsageOverview,
+    AdminAIUsageUser,
+    AdminAIUsageProvider,
+    PaginatedUsersResponse,
     UserCreateAdmin,
     WordCreate,
     WordUpdate,
@@ -52,6 +61,69 @@ from app.schemas.admin import (
 )
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
+logger = logging.getLogger(__name__)
+
+
+def _extract_db_error_message(exc: Exception) -> str:
+    """Extrai mensagem útil do erro de banco para resposta administrativa."""
+    raw = str(getattr(exc, "orig", exc) or "").strip()
+    if not raw:
+        return "erro desconhecido no banco de dados"
+    return raw.splitlines()[0]
+
+
+def _cleanup_user_dependencies(db: Session, user_id: int) -> None:
+    """Remove/neutraliza registros que referenciam um usuário antes do delete.
+
+    Suporta bancos antigos onde algumas FKs para users ficaram com NO ACTION.
+    """
+    fk_rows = db.execute(
+        text(
+            """
+            SELECT DISTINCT
+                n.nspname AS schema_name,
+                c.relname AS table_name,
+                a.attname AS column_name,
+                con.confdeltype AS confdeltype,
+                cols.is_nullable AS is_nullable
+            FROM pg_constraint con
+            JOIN pg_class c ON c.oid = con.conrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            JOIN unnest(con.conkey) AS k(attnum) ON TRUE
+            JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
+            LEFT JOIN information_schema.columns cols
+                ON cols.table_schema = n.nspname
+                AND cols.table_name = c.relname
+                AND cols.column_name = a.attname
+            WHERE con.contype = 'f'
+              AND con.confrelid = 'users'::regclass
+              AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+              AND c.relname <> 'users'
+            ORDER BY n.nspname, c.relname, a.attname
+            """
+        )
+    ).mappings().all()
+
+    for row in fk_rows:
+        schema_name = str(row["schema_name"])
+        table_name = str(row["table_name"])
+        column_name = str(row["column_name"])
+        confdeltype = str(row["confdeltype"] or "")
+        is_nullable = str(row["is_nullable"] or "").upper() == "YES"
+        qualified_table = f'"{schema_name}"."{table_name}"'
+
+        # confdeltype n = ON DELETE SET NULL
+        should_set_null = confdeltype == "n" or is_nullable
+        if should_set_null:
+            db.execute(
+                text(f'UPDATE {qualified_table} SET "{column_name}" = NULL WHERE "{column_name}" = :user_id'),
+                {"user_id": user_id},
+            )
+        else:
+            db.execute(
+                text(f'DELETE FROM {qualified_table} WHERE "{column_name}" = :user_id'),
+                {"user_id": user_id},
+            )
 
 
 # ============== DASHBOARD & ESTATÍSTICAS ==============
@@ -177,9 +249,166 @@ async def get_admin_performance(
     return AdminPerformanceReport(period_days=days, overview=overview, users=users)
 
 
+@router.get("/ai-usage", response_model=AdminAIUsageReport)
+async def get_admin_ai_usage(
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Relatório de uso de IA (tokens) por usuário e por modelo/provedor."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    settings = get_settings()
+
+    if not inspect(db.bind).has_table(AIUsageLog.__tablename__):
+        budget_tokens = max(0, int(getattr(settings, "ai_usage_budget_tokens", 0) or 0))
+        overview = AdminAIUsageOverview(
+            period_days=days,
+            total_requests=0,
+            total_prompt_tokens=0,
+            total_completion_tokens=0,
+            total_tokens=0,
+            budget_tokens=budget_tokens,
+            budget_used_percent=0.0,
+            remaining_tokens=budget_tokens if budget_tokens > 0 else None,
+            budget_status="unconfigured" if budget_tokens <= 0 else "ok",
+        )
+        return AdminAIUsageReport(
+            generated_at=datetime.now(timezone.utc),
+            overview=overview,
+            users=[],
+            providers=[],
+            system_usage_requests=0,
+            system_usage_tokens=0,
+        )
+
+    totals_row = (
+        db.query(
+            func.count(AIUsageLog.id).label("total_requests"),
+            func.coalesce(func.sum(AIUsageLog.prompt_tokens), 0).label("prompt_tokens"),
+            func.coalesce(func.sum(AIUsageLog.completion_tokens), 0).label("completion_tokens"),
+            func.coalesce(func.sum(AIUsageLog.total_tokens), 0).label("total_tokens"),
+        )
+        .filter(AIUsageLog.created_at >= since)
+        .first()
+    )
+
+    user_rows = (
+        db.query(
+            User.id.label("user_id"),
+            User.name.label("name"),
+            User.email.label("email"),
+            func.count(AIUsageLog.id).label("total_requests"),
+            func.coalesce(func.sum(AIUsageLog.prompt_tokens), 0).label("prompt_tokens"),
+            func.coalesce(func.sum(AIUsageLog.completion_tokens), 0).label("completion_tokens"),
+            func.coalesce(func.sum(AIUsageLog.total_tokens), 0).label("total_tokens"),
+            func.max(AIUsageLog.created_at).label("last_usage_at"),
+        )
+        .join(User, User.id == AIUsageLog.user_id)
+        .filter(AIUsageLog.created_at >= since)
+        .group_by(User.id)
+        .order_by(desc("total_tokens"), desc("total_requests"))
+        .limit(limit)
+        .all()
+    )
+
+    provider_rows = (
+        db.query(
+            AIUsageLog.provider.label("provider"),
+            AIUsageLog.model.label("model"),
+            func.count(AIUsageLog.id).label("total_requests"),
+            func.coalesce(func.sum(AIUsageLog.total_tokens), 0).label("total_tokens"),
+        )
+        .filter(AIUsageLog.created_at >= since)
+        .group_by(AIUsageLog.provider, AIUsageLog.model)
+        .order_by(desc("total_tokens"), desc("total_requests"))
+        .all()
+    )
+
+    system_usage_row = (
+        db.query(
+            func.count(AIUsageLog.id).label("total_requests"),
+            func.coalesce(func.sum(AIUsageLog.total_tokens), 0).label("total_tokens"),
+        )
+        .filter(
+            AIUsageLog.created_at >= since,
+            AIUsageLog.user_id.is_(None),
+        )
+        .first()
+    )
+
+    budget_tokens = max(0, int(getattr(settings, "ai_usage_budget_tokens", 0) or 0))
+    warn_pct = float(getattr(settings, "ai_usage_warning_percent", 80.0) or 80.0)
+    critical_pct = float(getattr(settings, "ai_usage_critical_percent", 95.0) or 95.0)
+
+    total_requests = int((totals_row.total_requests if totals_row else 0) or 0)
+    total_prompt_tokens = int((totals_row.prompt_tokens if totals_row else 0) or 0)
+    total_completion_tokens = int((totals_row.completion_tokens if totals_row else 0) or 0)
+    total_tokens = int((totals_row.total_tokens if totals_row else 0) or 0)
+
+    if budget_tokens > 0:
+        budget_used_percent = round((total_tokens / budget_tokens) * 100, 2)
+        remaining_tokens = max(0, budget_tokens - total_tokens)
+        if budget_used_percent >= critical_pct:
+            budget_status = "critical"
+        elif budget_used_percent >= warn_pct:
+            budget_status = "warning"
+        else:
+            budget_status = "ok"
+    else:
+        budget_used_percent = 0.0
+        remaining_tokens = None
+        budget_status = "unconfigured"
+
+    users = [
+        AdminAIUsageUser(
+            user_id=int(row.user_id),
+            name=row.name,
+            email=row.email,
+            total_requests=int(row.total_requests or 0),
+            prompt_tokens=int(row.prompt_tokens or 0),
+            completion_tokens=int(row.completion_tokens or 0),
+            total_tokens=int(row.total_tokens or 0),
+            last_usage_at=row.last_usage_at,
+        )
+        for row in user_rows
+    ]
+
+    providers = [
+        AdminAIUsageProvider(
+            provider=str(row.provider or "unknown"),
+            model=row.model,
+            total_requests=int(row.total_requests or 0),
+            total_tokens=int(row.total_tokens or 0),
+        )
+        for row in provider_rows
+    ]
+
+    overview = AdminAIUsageOverview(
+        period_days=days,
+        total_requests=total_requests,
+        total_prompt_tokens=total_prompt_tokens,
+        total_completion_tokens=total_completion_tokens,
+        total_tokens=total_tokens,
+        budget_tokens=budget_tokens,
+        budget_used_percent=budget_used_percent,
+        remaining_tokens=remaining_tokens,
+        budget_status=budget_status,
+    )
+
+    return AdminAIUsageReport(
+        generated_at=datetime.now(timezone.utc),
+        overview=overview,
+        users=users,
+        providers=providers,
+        system_usage_requests=int((system_usage_row.total_requests if system_usage_row else 0) or 0),
+        system_usage_tokens=int((system_usage_row.total_tokens if system_usage_row else 0) or 0),
+    )
+
+
 # ============== GERENCIAMENTO DE USUÁRIOS ==============
 
-@router.get("/users")
+@router.get("/users", response_model=PaginatedUsersResponse)
 async def list_users(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=100),
@@ -233,6 +462,7 @@ async def create_user_admin(
         hashed_password=get_password_hash(user_data.password),
         is_active=bool(user_data.is_active),
         is_admin=bool(user_data.is_admin),
+        email_verified_at=datetime.now(timezone.utc) if bool(user_data.email_verified) else None,
     )
     if user_data.daily_goal is not None:
         setattr(new_user, "daily_goal", user_data.daily_goal)
@@ -285,6 +515,13 @@ async def update_user(
             update_data["phone_number"] = phone_value
         else:
             update_data["phone_number"] = None
+    if "email_verified" in update_data:
+        email_verified_value = update_data.pop("email_verified")
+        if email_verified_value is True:
+            if not user.email_verified_at:
+                user.email_verified_at = datetime.now(timezone.utc)
+        elif email_verified_value is False:
+            user.email_verified_at = None
 
     for field, value in update_data.items():
         setattr(user, field, value)
@@ -308,8 +545,24 @@ async def delete_user(
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
-    db.delete(user)
-    db.commit()
+    try:
+        _cleanup_user_dependencies(db, user_id)
+        db.delete(user)
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        reason = _extract_db_error_message(exc)
+        logger.exception("Falha ao deletar usuario %s (%s): %s", user.id, user.email, reason)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Não foi possível deletar usuário devido a vínculos de dados: {reason}",
+        )
+    except Exception as exc:
+        db.rollback()
+        reason = _extract_db_error_message(exc)
+        logger.exception("Falha inesperada ao deletar usuario %s (%s): %s", user.id, user.email, reason)
+        raise HTTPException(status_code=500, detail=f"Falha ao deletar usuário: {reason}")
+
     return {"message": "Usuário deletado com sucesso"}
 
 
@@ -1123,6 +1376,7 @@ async def delete_text_admin(
 async def generate_text_audio_admin(
     text_id: int,
     voice: str = Query("nova"),
+    speed: float | None = Query(None, ge=0.65, le=1.05),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
@@ -1147,6 +1401,7 @@ async def generate_text_audio_admin(
         audio_bytes = await ai_teacher_service.generate_speech(
             content,
             voice=voice,
+            speed=speed,
             db=db,
             cache_operation="texts.ai.tts",
             cache_scope="global",
@@ -1161,7 +1416,8 @@ async def generate_text_audio_admin(
         raise HTTPException(status_code=500, detail=f"Erro ao gerar áudio: {msg}")
 
     # Nome determinístico para reaproveitar áudio quando o texto não muda
-    sha = hashlib.sha256(f"{voice}|{content}".encode("utf-8")).hexdigest()[:16]
+    speed_for_hash = ai_teacher_service._normalize_tts_speed(speed, default=ai_teacher_service.tts_speed)
+    sha = hashlib.sha256(f"{voice}|{speed_for_hash}|{content}".encode("utf-8")).hexdigest()[:16]
     filename = f"text_{text_id}_{sha}.mp3"
 
     # /app/app/routes -> /app/static/texts (mesmo diretório montado em /static no FastAPI)

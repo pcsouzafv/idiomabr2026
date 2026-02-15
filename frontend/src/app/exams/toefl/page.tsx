@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import ThemeToggle from '@/components/ThemeToggle';
 import ExamAiCoach from '../_components/ExamAiCoach';
+import ExamGuidedTrack from '../_components/ExamGuidedTrack';
 import {
   BookOpen,
   ArrowLeft,
@@ -90,6 +91,10 @@ export default function TOEFLPage() {
           </p>
         </div>
 
+        <div className="mb-6">
+          <ExamGuidedTrack exam="toefl" />
+        </div>
+
         <div className="grid lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm transition-colors">
             <h2 className="font-bold text-gray-900 dark:text-white mb-2">Estrutura (visão geral)</h2>
@@ -172,7 +177,7 @@ export default function TOEFLPage() {
           </div>
         </div>
         <div className="mt-6">
-          <ExamAiCoach exam="toefl" />
+          <ExamAiCoach exam="toefl" defaultSkill="writing" />
         </div>
       </main>
     </div>

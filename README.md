@@ -185,6 +185,8 @@ docker-start.bat
 docker-compose up --build -d
 ```
 
+`ENVIRONMENT` deve estar como `production` no `.env` para ativar as validações de segurança de cadastro/login (captcha + verificação de email).
+
 ### Iniciar com Docker (Desenvolvimento)
 
 ```bash

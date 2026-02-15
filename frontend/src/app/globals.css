@@ -8,6 +8,221 @@
   --background-end-rgb: 255, 255, 255;
 }
 
+.dark {
+  --foreground-rgb: 229, 231, 235;
+  --background-start-rgb: 2, 6, 23;
+  --background-end-rgb: 15, 23, 42;
+  color-scheme: dark;
+}
+
+/*
+ * Fallback dark mode styles for pages that still use light-only utility classes.
+ * The selectors are scoped to elements without an explicit dark: override.
+ */
+.dark [class~='bg-white']:not([class*='dark:bg-']) {
+  background-color: rgb(15 23 42 / 1);
+}
+
+.dark [class~='bg-white/90']:not([class*='dark:bg-']) {
+  background-color: rgb(15 23 42 / 0.9);
+}
+
+.dark [class~='bg-gray-50']:not([class*='dark:bg-']) {
+  background-color: rgb(17 24 39 / 1);
+}
+
+.dark [class~='bg-gray-100']:not([class*='dark:bg-']) {
+  background-color: rgb(31 41 55 / 1);
+}
+
+.dark [class~='bg-gray-200']:not([class*='dark:bg-']) {
+  background-color: rgb(55 65 81 / 1);
+}
+
+.dark [class~='bg-gray-300']:not([class*='dark:bg-']) {
+  background-color: rgb(75 85 99 / 1);
+}
+
+.dark [class~='text-black']:not([class*='dark:text-']) {
+  color: rgb(249 250 251 / 1);
+}
+
+.dark [class~='text-gray-900']:not([class*='dark:text-']) {
+  color: rgb(249 250 251 / 1);
+}
+
+.dark [class~='text-gray-800']:not([class*='dark:text-']) {
+  color: rgb(243 244 246 / 1);
+}
+
+.dark [class~='text-gray-700']:not([class*='dark:text-']) {
+  color: rgb(229 231 235 / 1);
+}
+
+.dark [class~='text-gray-600']:not([class*='dark:text-']) {
+  color: rgb(209 213 219 / 1);
+}
+
+.dark [class~='text-gray-500']:not([class*='dark:text-']) {
+  color: rgb(156 163 175 / 1);
+}
+
+.dark [class~='text-gray-400']:not([class*='dark:text-']) {
+  color: rgb(148 163 184 / 1);
+}
+
+.dark [class~='border-gray-100']:not([class*='dark:border-']) {
+  border-color: rgb(55 65 81 / 1);
+}
+
+.dark [class~='border-gray-200']:not([class*='dark:border-']) {
+  border-color: rgb(75 85 99 / 1);
+}
+
+.dark [class~='border-gray-300']:not([class*='dark:border-']) {
+  border-color: rgb(107 114 128 / 1);
+}
+
+.dark [class~='hover:bg-white']:not([class*='dark:hover:bg-']):hover {
+  background-color: rgb(31 41 55 / 1);
+}
+
+.dark [class~='hover:bg-gray-50']:not([class*='dark:hover:bg-']):hover {
+  background-color: rgb(31 41 55 / 1);
+}
+
+.dark [class~='hover:bg-gray-100']:not([class*='dark:hover:bg-']):hover {
+  background-color: rgb(55 65 81 / 1);
+}
+
+.dark [class~='hover:text-gray-900']:not([class*='dark:hover:text-']):hover {
+  color: rgb(255 255 255 / 1);
+}
+
+.dark [class~='hover:text-gray-700']:not([class*='dark:hover:text-']):hover {
+  color: rgb(243 244 246 / 1);
+}
+
+.dark [class~='hover:text-gray-600']:not([class*='dark:hover:text-']):hover {
+  color: rgb(229 231 235 / 1);
+}
+
+.dark [class~='from-purple-50']:not([class*='dark:from-']) {
+  --tw-gradient-from: rgb(30 41 59 / 1) var(--tw-gradient-from-position);
+}
+
+.dark [class~='to-blue-50']:not([class*='dark:to-']) {
+  --tw-gradient-to: rgb(15 23 42 / 1) var(--tw-gradient-to-position);
+}
+
+.dark [class~='from-red-50']:not([class*='dark:from-']) {
+  --tw-gradient-from: rgb(69 10 10 / 0.45) var(--tw-gradient-from-position);
+}
+
+.dark [class~='to-orange-50']:not([class*='dark:to-']) {
+  --tw-gradient-to: rgb(67 20 7 / 0.35) var(--tw-gradient-to-position);
+}
+
+.dark [class~='bg-purple-100']:not([class*='dark:bg-']) {
+  background-color: rgb(76 29 149 / 0.28);
+}
+
+.dark [class~='bg-blue-100']:not([class*='dark:bg-']) {
+  background-color: rgb(30 58 138 / 0.3);
+}
+
+.dark [class~='bg-green-100']:not([class*='dark:bg-']) {
+  background-color: rgb(21 128 61 / 0.25);
+}
+
+.dark [class~='bg-yellow-100']:not([class*='dark:bg-']) {
+  background-color: rgb(161 98 7 / 0.28);
+}
+
+.dark [class~='bg-red-100']:not([class*='dark:bg-']) {
+  background-color: rgb(153 27 27 / 0.3);
+}
+
+.dark [class~='bg-amber-100']:not([class*='dark:bg-']) {
+  background-color: rgb(146 64 14 / 0.3);
+}
+
+.dark [class~='bg-emerald-100']:not([class*='dark:bg-']) {
+  background-color: rgb(6 95 70 / 0.3);
+}
+
+.dark [class~='text-purple-700']:not([class*='dark:text-']) {
+  color: rgb(216 180 254 / 1);
+}
+
+.dark [class~='text-purple-600']:not([class*='dark:text-']) {
+  color: rgb(196 181 253 / 1);
+}
+
+.dark [class~='text-blue-700']:not([class*='dark:text-']) {
+  color: rgb(147 197 253 / 1);
+}
+
+.dark [class~='text-blue-600']:not([class*='dark:text-']) {
+  color: rgb(96 165 250 / 1);
+}
+
+.dark [class~='text-green-700']:not([class*='dark:text-']) {
+  color: rgb(110 231 183 / 1);
+}
+
+.dark [class~='text-red-700']:not([class*='dark:text-']) {
+  color: rgb(252 165 165 / 1);
+}
+
+.dark [class~='text-yellow-700']:not([class*='dark:text-']) {
+  color: rgb(253 224 71 / 1);
+}
+
+.dark [class~='text-amber-800']:not([class*='dark:text-']) {
+  color: rgb(252 211 77 / 1);
+}
+
+.dark [class~='text-emerald-800']:not([class*='dark:text-']) {
+  color: rgb(110 231 183 / 1);
+}
+
+.dark [class~='text-red-800']:not([class*='dark:text-']) {
+  color: rgb(252 165 165 / 1);
+}
+
+.dark [class~='border-purple-200']:not([class*='dark:border-']) {
+  border-color: rgb(147 51 234 / 0.45);
+}
+
+.dark [class~='border-purple-600']:not([class*='dark:border-']) {
+  border-color: rgb(126 34 206 / 0.7);
+}
+
+.dark [class~='border-red-200']:not([class*='dark:border-']) {
+  border-color: rgb(185 28 28 / 0.55);
+}
+
+.dark [class~='hover:bg-purple-50']:not([class*='dark:hover:bg-']):hover {
+  background-color: rgb(76 29 149 / 0.35);
+}
+
+.dark [class~='hover:bg-red-50']:not([class*='dark:hover:bg-']):hover {
+  background-color: rgb(127 29 29 / 0.4);
+}
+
+.dark [class~='hover:text-purple-700']:not([class*='dark:hover:text-']):hover {
+  color: rgb(233 213 255 / 1);
+}
+
+.dark [class~='hover:text-blue-700']:not([class*='dark:hover:text-']):hover {
+  color: rgb(191 219 254 / 1);
+}
+
+.dark [class~='hover:text-red-700']:not([class*='dark:hover:text-']):hover {
+  color: rgb(254 202 202 / 1);
+}
+
 body {
   color: rgb(var(--foreground-rgb));
   background: linear-gradient(

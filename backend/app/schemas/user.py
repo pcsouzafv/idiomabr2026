@@ -9,6 +9,7 @@ class UserCreate(BaseModel):
     phone_number: str
     name: str
     password: str
+    captcha_token: Optional[str] = None
 
 
 class UserLogin(BaseModel):
@@ -23,6 +24,7 @@ class UserResponse(BaseModel):
     name: str
     is_active: bool
     is_admin: bool = False
+    email_verified: bool = False
     daily_goal: int
     current_streak: int
     last_study_date: Optional[datetime] = None

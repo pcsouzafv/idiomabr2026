@@ -253,7 +253,7 @@ export default function DashboardPage() {
               <div>
                 <h3 className="text-xl font-bold">Estudar Frases com IA</h3>
                 <p className="text-blue-100">
-                  Professor de IA personalizado
+                  Treine contexto, gramática e pronúncia
                 </p>
               </div>
             </div>
@@ -387,7 +387,7 @@ export default function DashboardPage() {
                 <FileText className="h-8 w-8 text-gray-600 dark:text-gray-300" />
               </div>
               <div>
-                <h3 className="text-xl font-bold">Leitura & Escrita</h3>
+                <h3 className="text-xl font-bold">Slow Listening & Speaking Practice</h3>
                 <p className="text-gray-500 dark:text-gray-400">Pratique textos e receba correções</p>
               </div>
             </div>

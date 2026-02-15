@@ -8,8 +8,10 @@ import json
 import re
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.services.session_store import get_session_store
+from app.services.ai_usage_tracking import parse_usage_tokens, parse_model_name, track_ai_usage
 
 try:
     # OpenAI Python SDK v1+
@@ -81,6 +83,33 @@ class ConversationAIService:
         self._prefix = "conversation:"
         ttl = int(getattr(settings, "session_ttl_seconds", 0) or 0)
         self.session_ttl_seconds = ttl if ttl > 0 else 6 * 60 * 60
+
+    def _track_usage(
+        self,
+        db: Optional[Session],
+        *,
+        user_id: Optional[int],
+        operation: str,
+        provider: str,
+        model: Optional[str],
+        usage: Dict[str, int],
+        meta_json: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if db is None or user_id is None:
+            return
+
+        track_ai_usage(
+            db,
+            user_id=user_id,
+            provider=provider,
+            operation=operation,
+            model=model,
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+            total_tokens=usage.get("total_tokens", 0),
+            cached=False,
+            meta_json=meta_json,
+        )
     
     def _key(self, conversation_id: str) -> str:
         return f"{self._prefix}{conversation_id}"
@@ -212,7 +241,14 @@ class ConversationAIService:
             "total_questions": len(questions),
         }
 
-    def generate_lesson_questions(self, *, topic: str, num_questions: int = 10) -> List[str]:
+    def generate_lesson_questions(
+        self,
+        *,
+        topic: str,
+        num_questions: int = 10,
+        db: Optional[Session] = None,
+        user_id: Optional[int] = None,
+    ) -> List[str]:
         n = max(3, min(int(num_questions), 15))
         variation_token = uuid.uuid4().hex[:8]
         prompt = (
@@ -229,6 +265,8 @@ class ConversationAIService:
         ]
 
         try:
+            model_name: Optional[str] = self.model
+            usage: Dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
             if self.client is not None:
                 response = self.client.chat.completions.create(
                     model=self.model,
@@ -237,6 +275,8 @@ class ConversationAIService:
                     max_tokens=250,
                 )
                 raw = (response.choices[0].message.content or "").strip()
+                model_name = parse_model_name(response, self.model)
+                usage = parse_usage_tokens(getattr(response, "usage", None))
             else:
                 response = openai_legacy.ChatCompletion.create(
                     model=self.model,
@@ -245,6 +285,18 @@ class ConversationAIService:
                     max_tokens=250,
                 )
                 raw = response.choices[0].message.content.strip()
+                model_name = parse_model_name(response, self.model)
+                usage = parse_usage_tokens(response.get("usage") if isinstance(response, dict) else None)
+
+            self._track_usage(
+                db,
+                user_id=user_id,
+                operation="conversation.lesson.generate",
+                provider=self.ai_provider,
+                model=model_name,
+                usage=usage,
+                meta_json={"num_questions": n, "topic": topic},
+            )
 
             cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.IGNORECASE).strip()
 
@@ -287,7 +339,14 @@ class ConversationAIService:
         except Exception as e:
             raise ValueError(f"Erro ao gerar perguntas: {str(e)}")
 
-    def send_lesson_message(self, conversation_id: str, user_message: str) -> Dict[str, Any]:
+    def send_lesson_message(
+        self,
+        conversation_id: str,
+        user_message: str,
+        *,
+        db: Optional[Session] = None,
+        user_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
         conversation = self.get_conversation(conversation_id)
         if not conversation:
             raise ValueError(f"Conversa nao encontrada: {conversation_id}")
@@ -344,6 +403,8 @@ class ConversationAIService:
             max_tokens = max(120, min(self.max_tokens, 450))
             final_max_tokens = max(300, min(self.max_tokens, 900))
             lesson_max_tokens = final_max_tokens if is_last else max_tokens
+            model_name: Optional[str] = self.model
+            usage: Dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
             if self.client is not None:
                 response = self.client.chat.completions.create(
                     model=self.model,
@@ -352,6 +413,8 @@ class ConversationAIService:
                     max_tokens=lesson_max_tokens,
                 )
                 ai_response = (response.choices[0].message.content or "").strip()
+                model_name = parse_model_name(response, self.model)
+                usage = parse_usage_tokens(getattr(response, "usage", None))
             else:
                 response = openai_legacy.ChatCompletion.create(
                     model=self.model,
@@ -360,6 +423,18 @@ class ConversationAIService:
                     max_tokens=lesson_max_tokens,
                 )
                 ai_response = response.choices[0].message.content.strip()
+                model_name = parse_model_name(response, self.model)
+                usage = parse_usage_tokens(response.get("usage") if isinstance(response, dict) else None)
+
+            self._track_usage(
+                db,
+                user_id=user_id,
+                operation="conversation.lesson.message",
+                provider=self.ai_provider,
+                model=model_name,
+                usage=usage,
+                meta_json={"conversation_id": conversation_id, "is_final": is_last},
+            )
 
         except Exception as e:
             raise ValueError(f"Erro ao gerar resposta da IA: {str(e)}")
@@ -395,7 +470,10 @@ class ConversationAIService:
         self,
         conversation_id: str,
         user_message: str,
-        generate_audio: bool = True
+        generate_audio: bool = True,
+        *,
+        db: Optional[Session] = None,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Envia mensagem e obtém resposta da IA com áudio
@@ -434,6 +512,8 @@ class ConversationAIService:
         
         # Obtém resposta da IA
         try:
+            model_name: Optional[str] = self.model
+            usage: Dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
             if self.client is not None:
                 response = self.client.chat.completions.create(
                     model=self.model,
@@ -442,6 +522,8 @@ class ConversationAIService:
                     max_tokens=self.max_tokens,
                 )
                 ai_response = (response.choices[0].message.content or "").strip()
+                model_name = parse_model_name(response, self.model)
+                usage = parse_usage_tokens(getattr(response, "usage", None))
             else:
                 # SDK antigo
                 response = openai_legacy.ChatCompletion.create(
@@ -451,6 +533,18 @@ class ConversationAIService:
                     max_tokens=self.max_tokens,
                 )
                 ai_response = response.choices[0].message.content.strip()
+                model_name = parse_model_name(response, self.model)
+                usage = parse_usage_tokens(response.get("usage") if isinstance(response, dict) else None)
+
+            self._track_usage(
+                db,
+                user_id=user_id,
+                operation="conversation.message",
+                provider=self.ai_provider,
+                model=model_name,
+                usage=usage,
+                meta_json={"conversation_id": conversation_id},
+            )
 
         except Exception as e:
             raise ValueError(f"Erro ao gerar resposta da IA: {str(e)}")

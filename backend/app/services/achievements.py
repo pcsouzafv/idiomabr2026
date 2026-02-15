@@ -3,7 +3,7 @@ Serviço para verificar e desbloquear conquistas automaticamente.
 """
 from sqlalchemy.orm import Session
 from app.models.gamification import (
-    Achievement, UserAchievement, AchievementType
+    Achievement, UserAchievement, AchievementType, GameSession
 )
 from app.routes.stats import get_or_create_stats
 
@@ -29,6 +29,8 @@ def check_and_unlock_achievements(db: Session, user_id: int) -> list[Achievement
         ).all()
     }
 
+    perfect_games_count: int | None = None
+
     for achievement in all_achievements:
         # Pular se já desbloqueada
         if achievement.id in unlocked_ids:
@@ -44,8 +46,14 @@ def check_and_unlock_achievements(db: Session, user_id: int) -> list[Achievement
         elif achievement.type == AchievementType.GAMES:
             should_unlock = stats.games_played >= achievement.requirement
         elif achievement.type == AchievementType.PERFECT:
-            # TODO: Track perfect scores separately
-            pass
+            if perfect_games_count is None:
+                perfect_games_count = db.query(GameSession).filter(
+                    GameSession.user_id == user_id,
+                    GameSession.completed.is_(True),
+                    GameSession.max_score > 0,
+                    GameSession.score >= GameSession.max_score,
+                ).count()
+            should_unlock = perfect_games_count >= achievement.requirement
         elif achievement.type == AchievementType.SPEED:
             if stats.best_matching_time:
                 should_unlock = stats.best_matching_time <= achievement.requirement

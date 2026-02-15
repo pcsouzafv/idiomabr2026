@@ -30,6 +30,13 @@ interface DictationSession {
   total: number;
 }
 
+interface AchievementSummary {
+  id: number;
+  name: string;
+  icon: string;
+  xp_reward: number;
+}
+
 interface DictationResult {
   score: number;
   total: number;
@@ -41,6 +48,7 @@ interface DictationResult {
     correct_answer: string;
     is_correct: boolean;
   }>;
+  new_achievements: AchievementSummary[];
 }
 
 export default function DictationPage() {
@@ -248,6 +256,17 @@ export default function DictationPage() {
                 );
               })}
             </div>
+
+            {result.new_achievements.length > 0 && (
+              <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-4 mb-6 text-left">
+                <p className="text-purple-300 font-medium mb-2">Novas Conquistas!</p>
+                {result.new_achievements.map((achievement) => (
+                  <div key={achievement.id} className="text-sm text-purple-100 mb-1 last:mb-0">
+                    {achievement.icon} {achievement.name} (+{achievement.xp_reward} XP)
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="flex gap-3">
               <Link

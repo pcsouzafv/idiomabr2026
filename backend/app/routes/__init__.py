@@ -9,5 +9,6 @@ from app.routes.admin import router as admin_router
 from app.routes.texts import router as texts_router
 from app.routes.exams_ai import router as exams_router
 from app.routes.conversation import router as conversation_router
+from app.routes.support import router as support_router
 
-__all__ = ["auth_router", "words_router", "study_router", "games_router", "stats_router", "videos_router", "sentences_router", "admin_router", "texts_router", "exams_router", "conversation_router"]
+__all__ = ["auth_router", "words_router", "study_router", "games_router", "stats_router", "videos_router", "sentences_router", "admin_router", "texts_router", "exams_router", "conversation_router", "support_router"]

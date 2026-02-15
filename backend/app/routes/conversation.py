@@ -200,7 +200,10 @@ async def start_conversation(
                 conversation_id=conversation_id,
                 user_message=request.initial_message,
                 generate_audio=False,
+                db=db,
+                user_id=current_user.id,
             )
+            db.commit()
 
         return ConversationResponse(
             conversation_id=conversation_id,
@@ -265,7 +268,10 @@ async def generate_lesson_questions(
         questions = conversation_ai_service.generate_lesson_questions(
             topic=request.topic,
             num_questions=request.num_questions,
+            db=db,
+            user_id=current_user.id,
         )
+        db.commit()
         return LessonGenerateResponse(questions=questions)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -292,8 +298,11 @@ async def send_message(
         result = conversation_ai_service.send_message(
             conversation_id=conversation_id,
             user_message=request.message,
-            generate_audio=False
+            generate_audio=False,
+            db=db,
+            user_id=current_user.id,
         )
+        db.commit()
         
         message_id = str(uuid.uuid4())
         timestamp = datetime.utcnow()
@@ -335,7 +344,10 @@ async def send_lesson_message(
         result = conversation_ai_service.send_lesson_message(
             conversation_id=conversation_id,
             user_message=request.message,
+            db=db,
+            user_id=current_user.id,
         )
+        db.commit()
 
         if result.get("is_final"):
             score = None

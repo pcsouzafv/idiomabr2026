@@ -15,6 +15,7 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)  # Permissão de administrador
+    email_verified_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
@@ -27,3 +28,7 @@ class User(Base):
     reviews = relationship("Review", back_populates="user", cascade="all, delete-orphan")
     progress = relationship("UserProgress", back_populates="user", cascade="all, delete-orphan")
     video_progress = relationship("VideoProgress", back_populates="user", cascade="all, delete-orphan")
+
+    @property
+    def email_verified(self) -> bool:
+        return self.email_verified_at is not None

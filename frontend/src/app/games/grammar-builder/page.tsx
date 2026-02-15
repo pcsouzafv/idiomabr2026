@@ -42,6 +42,13 @@ interface GrammarBuilderSession {
   total: number;
 }
 
+interface AchievementSummary {
+  id: number;
+  name: string;
+  icon: string;
+  xp_reward: number;
+}
+
 interface GrammarBuilderResult {
   score: number;
   total: number;
@@ -58,7 +65,12 @@ interface GrammarBuilderResult {
     verb: string;
     level?: number;
     tense?: string;
+    missing_tokens?: string[];
+    extra_tokens?: string[];
+    first_mismatch?: string;
+    detailed_explanation?: string;
   }>;
+  new_achievements: AchievementSummary[];
 }
 
 const tenseLabels: Record<string, string> = {
@@ -111,6 +123,15 @@ function formatDuration(totalSeconds: number): string {
   return `${minutes}:${seconds}`;
 }
 
+function extractErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error !== 'object' || error === null) return fallback;
+  if (!('response' in error)) return fallback;
+  const response = (error as { response?: { data?: { detail?: string } } }).response;
+  const detail = response?.data?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail.trim();
+  return fallback;
+}
+
 export default function GrammarBuilderPage() {
   const searchParams = useSearchParams();
   const initialTense = (searchParams.get('tense') || '').toLowerCase();
@@ -128,9 +149,10 @@ export default function GrammarBuilderPage() {
   const [builtTokens, setBuiltTokens] = useState<string[]>([]);
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<GrammarBuilderResult | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [feedback, setFeedback] = useState<'correct' | 'wrong' | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -169,6 +191,7 @@ export default function GrammarBuilderPage() {
   const loadSession = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       setResult(null);
       setFeedback(null);
       setAnswers({});
@@ -189,23 +212,28 @@ export default function GrammarBuilderPage() {
         level: selectedLevel ?? undefined,
       });
       const data: GrammarBuilderSession = res.data;
+      if (!data.items || data.items.length === 0) {
+        setSession(null);
+        setLoadError('Nenhum desafio encontrado para os filtros selecionados.');
+        return;
+      }
       setSession(data);
 
       const first = data.items[0];
       setBankTokens(first?.tokens || []);
       setBuiltTokens([]);
-    } catch (e) {
+    } catch (e: unknown) {
       console.error('Erro ao iniciar Gramática:', e);
       setSession(null);
+      setLoadError(extractErrorMessage(e, 'Não foi possível gerar desafios com os filtros atuais.'));
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadSession();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTense, selectedLevel]);
+    setLoadError(null);
+  }, [selectedLevel, selectedTense]);
 
   useEffect(() => {
     if (!session) return;
@@ -400,16 +428,17 @@ export default function GrammarBuilderPage() {
           </div>
           <button
             onClick={loadSession}
-            className="flex items-center gap-2 px-4 py-2 bg-fuchsia-500/20 text-fuchsia-200 rounded-xl hover:bg-fuchsia-500/30 transition"
+            disabled={loading || submitting}
+            className="flex items-center gap-2 px-4 py-2 bg-fuchsia-500/20 text-fuchsia-200 rounded-xl hover:bg-fuchsia-500/30 transition disabled:opacity-60"
           >
             <RefreshCw className="w-5 h-5" />
-            Reiniciar
+            {loading ? 'Gerando...' : 'Gerar desafio'}
           </button>
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
-        <div className="bg-slate-900/55 border border-slate-700 rounded-2xl p-4 mb-6">
+        <div className="bg-slate-900/55 border border-slate-700 rounded-2xl p-4 mb-6 space-y-4">
           <div className="flex flex-wrap gap-4 items-center">
             <div className="flex items-center gap-2 text-gray-300">
               <Sparkles className="w-4 h-4 text-yellow-400" />
@@ -447,6 +476,27 @@ export default function GrammarBuilderPage() {
               </select>
             </div>
           </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={loadSession}
+              disabled={loading || submitting}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-fuchsia-600 to-violet-500 text-white hover:from-fuchsia-500 hover:to-violet-400 disabled:opacity-60"
+            >
+              <RefreshCw className="w-4 h-4" />
+              {loading ? 'Gerando desafios...' : 'Gerar desafio com filtros'}
+            </button>
+            <p className="text-xs text-gray-400">
+              O desafio só começa quando você clicar em gerar. Alterou filtro? Gere novamente.
+            </p>
+          </div>
+
+          {loadError && (
+            <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {loadError}
+            </div>
+          )}
         </div>
 
         {!loading && session && !result && (
@@ -496,10 +546,15 @@ export default function GrammarBuilderPage() {
         )}
 
         {loading ? (
-          <div className="text-gray-300">Carregando…</div>
+          <div className="bg-slate-900/55 border border-slate-700 rounded-2xl p-6 text-gray-200">
+            Gerando desafios de gramática com os filtros selecionados...
+          </div>
         ) : !session || !currentItem ? (
-          <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-6 text-gray-200">
-            Não foi possível carregar o jogo. Tente novamente.
+          <div className="bg-slate-900/55 border border-slate-700 rounded-xl p-6 text-gray-200">
+            <p className="text-white font-semibold mb-2">Pronto para começar</p>
+            <p className="text-sm text-gray-300">
+              Escolha os filtros (tempo verbal e nível) e clique em <span className="text-fuchsia-200">Gerar desafio com filtros</span>.
+            </p>
           </div>
         ) : result ? (
           <div className="bg-slate-900/55 border border-slate-700 rounded-2xl p-6 text-gray-200">
@@ -528,6 +583,17 @@ export default function GrammarBuilderPage() {
               </div>
             </div>
 
+            {result.new_achievements.length > 0 && (
+              <div className="mt-5 bg-purple-500/10 border border-purple-500/30 rounded-xl p-4">
+                <p className="text-purple-300 font-medium mb-2">Novas Conquistas!</p>
+                {result.new_achievements.map((achievement) => (
+                  <div key={achievement.id} className="text-sm text-purple-100 mb-1 last:mb-0">
+                    {achievement.icon} {achievement.name} (+{achievement.xp_reward} XP)
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="mt-6 space-y-4">
               {result.results.map((r) => (
                 <div key={r.item_id} className="bg-gray-900/40 border border-gray-700 rounded-lg p-4">
@@ -554,11 +620,34 @@ export default function GrammarBuilderPage() {
                       <div>Nível: <span className="text-gray-200">{r.level ?? '-'}</span></div>
                       <div>Dica: <span className="text-gray-200">{r.tip || '-'}</span></div>
                     </div>
-                    {r.explanation && (
-                      <div className="mt-2 text-xs text-gray-300">
-                        <span className="text-gray-400">Explicação:</span> {r.explanation}
+                    {!r.correct && (r.missing_tokens?.length || r.extra_tokens?.length) ? (
+                      <div className="mt-3 space-y-2 text-xs">
+                        {r.missing_tokens && r.missing_tokens.length > 0 && (
+                          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-100">
+                            Itens que faltaram: <span className="font-medium">{r.missing_tokens.join(', ')}</span>
+                          </div>
+                        )}
+                        {r.extra_tokens && r.extra_tokens.length > 0 && (
+                          <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-100">
+                            Itens extras/fora de posição: <span className="font-medium">{r.extra_tokens.join(', ')}</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                    {!r.correct && r.first_mismatch && (
+                      <div className="mt-3 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100">
+                        {r.first_mismatch}
                       </div>
                     )}
+                    {r.detailed_explanation ? (
+                      <div className="mt-3 rounded-lg border border-slate-600 bg-slate-900/70 px-3 py-3 text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">
+                        <span className="text-fuchsia-200 font-semibold">Análise:</span> {r.detailed_explanation}
+                      </div>
+                    ) : r.explanation ? (
+                      <div className="mt-3 rounded-lg border border-slate-600 bg-slate-900/70 px-3 py-3 text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">
+                        <span className="text-fuchsia-200 font-semibold">Explicação:</span> {r.explanation}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ))}

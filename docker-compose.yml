@@ -58,8 +58,19 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-idiomasbr}:${POSTGRES_PASSWORD:-idiomasbr123}@postgres:5432/${POSTGRES_DB:-idiomasbr}
       SECRET_KEY: ${SECRET_KEY:-sua-chave-secreta-muito-segura-aqui-123456}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
       ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: 10080
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-https://idiomasbr.com}
+      SMTP_HOST: ${SMTP_HOST:-smtp.hostinger.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-admin@idiomasbr.com}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-admin@idiomasbr.com}
+      SMTP_TLS: ${SMTP_TLS:-false}
+      SMTP_SSL: ${SMTP_SSL:-true}
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:-admin@idiomasbr.com}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LEMONFOX_API_KEY: ${LEMONFOX_API_KEY:-}
@@ -75,6 +86,14 @@ services:
       CONVERSATION_MAX_RETRIES: ${CONVERSATION_MAX_RETRIES:-1}
       OPENAI_TTS_BASE_URL: ${OPENAI_TTS_BASE_URL:-https://api.openai.com/v1}
       OPENAI_TTS_MODEL: ${OPENAI_TTS_MODEL:-tts-1}
+      OPENAI_TTS_SPEED: ${OPENAI_TTS_SPEED:-0.88}
+      AI_TEACHER_CHAT_TIMEOUT_SECONDS: ${AI_TEACHER_CHAT_TIMEOUT_SECONDS:-18}
+      AI_TEACHER_CHAT_MAX_RETRIES: ${AI_TEACHER_CHAT_MAX_RETRIES:-0}
+      AI_TEACHER_CHAT_TEMPERATURE: ${AI_TEACHER_CHAT_TEMPERATURE:-0.55}
+      AI_TEACHER_OPENAI_MODEL: ${AI_TEACHER_OPENAI_MODEL:-gpt-4o-mini}
+      AI_TEACHER_DEEPSEEK_MODEL: ${AI_TEACHER_DEEPSEEK_MODEL:-deepseek-chat}
+      AI_TEACHER_OPENAI_MAX_TOKENS: ${AI_TEACHER_OPENAI_MAX_TOKENS:-550}
+      AI_TEACHER_DEEPSEEK_MAX_TOKENS: ${AI_TEACHER_DEEPSEEK_MAX_TOKENS:-700}
       OLLAMA_URL: http://ollama:11434
       USE_OLLAMA_FALLBACK: ${USE_OLLAMA_FALLBACK:-false}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
@@ -102,13 +121,15 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=http://localhost:8000
-        - NEXT_PUBLIC_STT_WS_URL=${NEXT_PUBLIC_STT_WS_URL:-ws://localhost:8001}
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-https://idiomasbr.com}
+        - NEXT_PUBLIC_STT_WS_URL=${NEXT_PUBLIC_STT_WS_URL:-}
+        - NEXT_PUBLIC_TURNSTILE_SITE_KEY=${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-}
     container_name: idiomasbr-frontend
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-      NEXT_PUBLIC_STT_WS_URL: ${NEXT_PUBLIC_STT_WS_URL:-ws://localhost:8001}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://idiomasbr.com}
+      NEXT_PUBLIC_STT_WS_URL: ${NEXT_PUBLIC_STT_WS_URL:-}
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-}
     ports:
       - "3000:3000"
     depends_on:

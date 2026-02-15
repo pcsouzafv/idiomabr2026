@@ -1,7 +1,7 @@
 """
 Schemas para rotas de administração
 """
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Literal
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
 
@@ -44,6 +44,45 @@ class AdminPerformanceReport(BaseModel):
     users: List[AdminUserPerformance]
 
 
+class AdminAIUsageOverview(BaseModel):
+    period_days: int
+    total_requests: int
+    total_prompt_tokens: int
+    total_completion_tokens: int
+    total_tokens: int
+    budget_tokens: int
+    budget_used_percent: float
+    remaining_tokens: Optional[int] = None
+    budget_status: Literal["ok", "warning", "critical", "unconfigured"]
+
+
+class AdminAIUsageUser(BaseModel):
+    user_id: int
+    name: str
+    email: EmailStr
+    total_requests: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    last_usage_at: Optional[datetime] = None
+
+
+class AdminAIUsageProvider(BaseModel):
+    provider: str
+    model: Optional[str] = None
+    total_requests: int
+    total_tokens: int
+
+
+class AdminAIUsageReport(BaseModel):
+    generated_at: datetime
+    overview: AdminAIUsageOverview
+    users: List[AdminAIUsageUser]
+    providers: List[AdminAIUsageProvider]
+    system_usage_requests: int
+    system_usage_tokens: int
+
+
 # ============== USUÁRIOS ==============
 
 class UserResponse(BaseModel):
@@ -53,6 +92,7 @@ class UserResponse(BaseModel):
     name: str
     is_active: bool
     is_admin: bool
+    email_verified: bool
     daily_goal: int
     current_streak: int
     last_study_date: Optional[datetime]
@@ -63,12 +103,21 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
+class PaginatedUsersResponse(BaseModel):
+    items: List[UserResponse]
+    total: int
+    page: int
+    per_page: int
+    pages: int
+
+
 class UserUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[EmailStr] = None
     phone_number: Optional[str] = None
     is_active: Optional[bool] = None
     is_admin: Optional[bool] = None
+    email_verified: Optional[bool] = None
     daily_goal: Optional[int] = None
     password: Optional[str] = None
 
@@ -80,6 +129,7 @@ class UserCreateAdmin(BaseModel):
     password: str
     is_active: Optional[bool] = True
     is_admin: Optional[bool] = False
+    email_verified: Optional[bool] = True
     daily_goal: Optional[int] = None
 
 

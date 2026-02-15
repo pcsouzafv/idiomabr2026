@@ -42,6 +42,47 @@ interface AdminPerformanceReport {
   users: AdminUserPerformance[];
 }
 
+type BudgetStatus = "ok" | "warning" | "critical" | "unconfigured";
+
+interface AdminAIUsageOverview {
+  period_days: number;
+  total_requests: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_tokens: number;
+  budget_tokens: number;
+  budget_used_percent: number;
+  remaining_tokens?: number | null;
+  budget_status: BudgetStatus;
+}
+
+interface AdminAIUsageUser {
+  user_id: number;
+  name: string;
+  email: string;
+  total_requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  last_usage_at?: string | null;
+}
+
+interface AdminAIUsageProvider {
+  provider: string;
+  model?: string | null;
+  total_requests: number;
+  total_tokens: number;
+}
+
+interface AdminAIUsageReport {
+  generated_at: string;
+  overview: AdminAIUsageOverview;
+  users: AdminAIUsageUser[];
+  providers: AdminAIUsageProvider[];
+  system_usage_requests: number;
+  system_usage_tokens: number;
+}
+
 interface StatCardProps {
   title: string;
   value: number | string;
@@ -55,7 +96,7 @@ export default function AdminDashboard() {
   const { user, token } = useAuthStore();
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "words" | "sentences" | "videos" | "users" | "reading_writing" | "performance">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "words" | "sentences" | "videos" | "users" | "reading_writing" | "performance" | "ai_usage">("overview");
 
   const loadStats = useCallback(async () => {
     try {
@@ -183,7 +224,7 @@ export default function AdminDashboard() {
                   : "bg-white text-gray-600 hover:bg-gray-50"
               }`}
             >
-              ✍️ Leitura e Escrita
+              ✍️ Slow Listening & Speaking Practice
             </button>
             <button
               onClick={() => setActiveTab("performance")}
@@ -194,6 +235,16 @@ export default function AdminDashboard() {
               }`}
             >
               📈 Desempenho
+            </button>
+            <button
+              onClick={() => setActiveTab("ai_usage")}
+              className={`flex-1 px-6 py-4 font-semibold transition-colors ${
+                activeTab === "ai_usage"
+                  ? "bg-purple-600 text-white"
+                  : "bg-white text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              🤖 Uso de IA
             </button>
           </div>
 
@@ -207,6 +258,7 @@ export default function AdminDashboard() {
             {activeTab === "users" && <UsersTab />}
             {activeTab === "reading_writing" && <ReadingWritingTab />}
             {activeTab === "performance" && <PerformanceTab token={token!} />}
+            {activeTab === "ai_usage" && <AIUsageTab token={token!} />}
           </div>
         </div>
       </div>
@@ -440,6 +492,248 @@ function PerformanceTab({ token }: { token: string }) {
   );
 }
 
+function AIUsageTab({ token }: { token: string }) {
+  const [report, setReport] = useState<AdminAIUsageReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState(30);
+
+  const loadReport = useCallback(async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/admin/ai-usage`,
+        {
+          params: { days, limit: 100 },
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      setReport(response.data);
+    } catch (error) {
+      console.error("Erro ao carregar relatório de uso de IA:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [days, token]);
+
+  useEffect(() => {
+    void loadReport();
+  }, [loadReport]);
+
+  if (loading) {
+    return (
+      <div className="text-center py-12">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
+      </div>
+    );
+  }
+
+  if (!report) {
+    return <div className="text-center text-gray-600 py-12">Não foi possível carregar o relatório de IA.</div>;
+  }
+
+  const statusStyles: Record<BudgetStatus, string> = {
+    ok: "bg-emerald-100 text-emerald-800",
+    warning: "bg-amber-100 text-amber-800",
+    critical: "bg-red-100 text-red-800",
+    unconfigured: "bg-gray-100 text-gray-700",
+  };
+
+  const statusLabel: Record<BudgetStatus, string> = {
+    ok: "Dentro do orçamento",
+    warning: "Próximo do limite",
+    critical: "Acima do limite",
+    unconfigured: "Sem orçamento configurado",
+  };
+
+  const topUser = report.users[0];
+  const budgetConfigured = report.overview.budget_tokens > 0;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Uso de IA por usuário</h2>
+          <p className="text-sm text-gray-600">Consumo de tokens para monitorar custos e planejar limites.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-semibold text-gray-600">Período:</label>
+          <select
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            aria-label="Período do relatório de IA"
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
+          >
+            <option value={7}>Últimos 7 dias</option>
+            <option value={30}>Últimos 30 dias</option>
+            <option value={90}>Últimos 90 dias</option>
+            <option value={180}>Últimos 180 dias</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <StatCard
+          title="Tokens totais"
+          value={report.overview.total_tokens}
+          subtitle={`${report.overview.total_prompt_tokens} prompt + ${report.overview.total_completion_tokens} resposta`}
+          icon="🧮"
+          color="bg-indigo-500"
+        />
+        <StatCard
+          title="Requisições IA"
+          value={report.overview.total_requests}
+          subtitle={`Período de ${report.overview.period_days} dias`}
+          icon="🤖"
+          color="bg-blue-500"
+        />
+        <StatCard
+          title="Maior consumo"
+          value={topUser ? topUser.total_tokens : 0}
+          subtitle={topUser ? topUser.name : "Sem dados"}
+          icon="🏅"
+          color="bg-purple-500"
+        />
+      </div>
+
+      <div className="bg-white rounded-xl shadow-lg p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <h3 className="text-lg font-semibold text-gray-800">Saúde do orçamento</h3>
+          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusStyles[report.overview.budget_status]}`}>
+            {statusLabel[report.overview.budget_status]}
+          </span>
+        </div>
+
+        {budgetConfigured ? (
+          <div className="space-y-3">
+            <div className="text-sm text-gray-700">
+              Orçamento configurado: <strong>{report.overview.budget_tokens.toLocaleString()}</strong> tokens
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-3">
+              <div
+                className={`h-3 rounded-full ${
+                  report.overview.budget_status === "critical"
+                    ? "bg-red-500"
+                    : report.overview.budget_status === "warning"
+                      ? "bg-amber-500"
+                      : "bg-emerald-500"
+                }`}
+                style={{ width: `${Math.min(100, report.overview.budget_used_percent)}%` }}
+              />
+            </div>
+            <div className="text-sm text-gray-700">
+              Uso atual: <strong>{report.overview.budget_used_percent.toFixed(2)}%</strong> | Restante:{" "}
+              <strong>{(report.overview.remaining_tokens ?? 0).toLocaleString()}</strong> tokens
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-600">
+            Configure `AI_USAGE_BUDGET_TOKENS` no backend para receber alerta de “token acabando”.
+          </p>
+        )}
+
+        {report.system_usage_tokens > 0 ? (
+          <p className="text-xs text-gray-500 mt-3">
+            Uso não vinculado a usuário: {report.system_usage_tokens.toLocaleString()} tokens em{" "}
+            {report.system_usage_requests.toLocaleString()} requisições.
+          </p>
+        ) : null}
+      </div>
+
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+        <div className="px-6 py-4 border-b">
+          <h3 className="text-lg font-semibold text-gray-800">Consumo por usuário</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Usuário</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Req.</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Prompt</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Resposta</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Último uso</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {report.users.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-6 text-center text-sm text-gray-500">
+                    Nenhum consumo no período selecionado.
+                  </td>
+                </tr>
+              ) : (
+                report.users.map((usage) => (
+                  <tr key={usage.user_id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 text-sm font-semibold text-gray-800">{usage.name}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{usage.email}</td>
+                    <td className="px-6 py-4 text-sm text-right text-gray-700">
+                      {usage.total_requests.toLocaleString()}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-right text-gray-700">
+                      {usage.prompt_tokens.toLocaleString()}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-right text-gray-700">
+                      {usage.completion_tokens.toLocaleString()}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-right font-semibold text-gray-800">
+                      {usage.total_tokens.toLocaleString()}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-right text-gray-600">
+                      {usage.last_usage_at ? new Date(usage.last_usage_at).toLocaleString() : "—"}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+        <div className="px-6 py-4 border-b">
+          <h3 className="text-lg font-semibold text-gray-800">Consumo por provedor/modelo</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Provedor</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Modelo</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Requisições</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Tokens</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {report.providers.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-6 py-6 text-center text-sm text-gray-500">
+                    Sem dados de provedor/modelo no período.
+                  </td>
+                </tr>
+              ) : (
+                report.providers.map((provider, idx) => (
+                  <tr key={`${provider.provider}-${provider.model ?? "none"}-${idx}`} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 text-sm font-semibold text-gray-800">{provider.provider}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{provider.model || "—"}</td>
+                    <td className="px-6 py-4 text-sm text-right text-gray-700">
+                      {provider.total_requests.toLocaleString()}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-right font-semibold text-gray-800">
+                      {provider.total_tokens.toLocaleString()}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ============== TAB: PALAVRAS ==============
 function WordsTab() {
   return (
@@ -520,12 +814,12 @@ function UsersTab() {
   );
 }
 
-// ============== TAB: LEITURA E ESCRITA ==============
+// ============== TAB: SLOW LISTENING & SPEAKING PRACTICE ==============
 function ReadingWritingTab() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">Leitura e Escrita</h2>
+        <h2 className="text-2xl font-bold text-gray-800">Slow Listening & Speaking Practice</h2>
         <Link
           href="/admin/texts"
           className="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors font-semibold inline-block"

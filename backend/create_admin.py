@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Script para criar usuário admin"""
+from datetime import datetime, timezone
 from app.core.database import SessionLocal
 from app.models.user import User
 from passlib.context import CryptContext
@@ -26,6 +27,7 @@ def create_admin():
         hashed_password=hashed_password,
         is_active=True,
         is_admin=True,
+        email_verified_at=datetime.now(timezone.utc),
         daily_goal=20,
         current_streak=0
     )

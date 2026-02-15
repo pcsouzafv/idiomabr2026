@@ -47,6 +47,14 @@ interface HangmanGuessResponse {
   won: boolean;
   word?: string;
   xp_earned?: number;
+  new_achievements?: AchievementSummary[];
+}
+
+interface AchievementSummary {
+  id: number;
+  name: string;
+  icon: string;
+  xp_reward: number;
 }
 
 interface HangmanGameState {
@@ -72,6 +80,7 @@ interface HangmanGameState {
   won: boolean;
   word?: string;
   xpEarned?: number;
+  newAchievements: AchievementSummary[];
 }
 
 export default function HangmanPage() {
@@ -110,6 +119,7 @@ export default function HangmanPage() {
         won: false,
         word: undefined,
         xpEarned: undefined,
+        newAchievements: [],
       });
     } catch (error) {
       console.error('Error starting game:', error);
@@ -143,6 +153,7 @@ export default function HangmanPage() {
               won: data.won,
               word: data.word ?? prev.word,
               xpEarned: data.xp_earned ?? prev.xpEarned,
+              newAchievements: data.new_achievements ?? prev.newAchievements,
             }
           : prev
       );
@@ -454,6 +465,17 @@ export default function HangmanPage() {
                   <div className="flex items-center justify-center gap-2 text-yellow-400 mb-4">
                     <Star className="w-5 h-5" />
                     <span className="font-bold">+{game.xpEarned} XP</span>
+                  </div>
+                )}
+
+                {game.newAchievements.length > 0 && (
+                  <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-4 mb-4 text-left">
+                    <p className="text-purple-300 font-medium mb-2">Novas Conquistas!</p>
+                    {game.newAchievements.map((achievement) => (
+                      <div key={achievement.id} className="text-sm text-purple-100 mb-1 last:mb-0">
+                        {achievement.icon} {achievement.name} (+{achievement.xp_reward} XP)
+                      </div>
+                    ))}
                   </div>
                 )}
 

@@ -264,7 +264,7 @@ export default function AdminTextsPage() {
             >
               ← Voltar ao Painel Administrativo
             </Link>
-            <h1 className="text-3xl font-bold text-gray-800">Textos (Leitura & Escrita)</h1>
+            <h1 className="text-3xl font-bold text-gray-800">Textos (Slow Listening & Speaking Practice)</h1>
             <p className="text-gray-600">Gerencie textos, tradução e áudio (URL)</p>
           </div>
 

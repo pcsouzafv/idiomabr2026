@@ -32,6 +32,48 @@ from app.services.spaced_repetition import calculate_next_review
 router = APIRouter(prefix="/api/sentences", tags=["sentences"])
 
 
+@router.get("/filters")
+def get_sentence_filters(
+    level: Optional[str] = None,
+    category: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Retorna níveis e categorias disponíveis com contagem, filtrados entre si."""
+
+    # Levels: filtered by selected category
+    level_query = db.query(Sentence.level, func.count(Sentence.id))
+    if category:
+        level_query = level_query.filter(Sentence.category == category)
+    level_rows = level_query.group_by(Sentence.level).order_by(Sentence.level).all()
+
+    # Categories: filtered by selected level
+    cat_query = db.query(Sentence.category, func.count(Sentence.id)).filter(
+        Sentence.category.isnot(None)
+    )
+    if level:
+        cat_query = cat_query.filter(Sentence.level == level)
+    category_rows = (
+        cat_query.group_by(Sentence.category)
+        .order_by(func.count(Sentence.id).desc())
+        .all()
+    )
+
+    # Total: filtered by both
+    total_query = db.query(func.count(Sentence.id))
+    if level:
+        total_query = total_query.filter(Sentence.level == level)
+    if category:
+        total_query = total_query.filter(Sentence.category == category)
+    total = total_query.scalar() or 0
+
+    return {
+        "total": total,
+        "levels": [{"value": lv, "count": cnt} for lv, cnt in level_rows],
+        "categories": [{"value": cat, "count": cnt} for cat, cnt in category_rows],
+    }
+
+
 @router.get("/", response_model=List[SentenceResponse])
 def list_sentences(
     skip: int = 0,
@@ -374,6 +416,7 @@ Regras:
 - Responda primeiro à pergunta.
 - Use o contexto da frase somente se ajudar a responder.
 - Não reinicie a análise da frase automaticamente.
+- Seja objetiva (até 140 palavras).
 - Depois, faça no máximo 1 pergunta de acompanhamento (opcional).
 """
 
@@ -424,15 +467,18 @@ async def analyze_sentence_with_ai(
 
     # Obter estatísticas do usuário para personalizar
     user_stats = await rag_service._get_user_stats(db, current_user.id)
+    user_level = user_stats.get("estimated_level", "A1")
+    normalized_level = str(user_level or "A1").strip().upper()
 
     try:
         ai_response = await ai_teacher_service.analyze_sentence(
             sentence_en=sentence.english,
             sentence_pt=sentence.portuguese,
-            user_level=user_stats.get("estimated_level", "A1"),
+            user_level=normalized_level,
             db=db,
             cache_operation="sentences.ai.analyze",
-            cache_scope=f"user:{current_user.id}",
+            # Compartilha cache por frase + nível para reduzir latência em produção.
+            cache_scope=f"sentence:{sentence_id}:level:{normalized_level}",
         )
 
         # Salvar conversa

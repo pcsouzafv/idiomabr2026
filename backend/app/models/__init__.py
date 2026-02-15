@@ -4,6 +4,7 @@ from app.models.review import Review
 from app.models.progress import UserProgress
 from app.models.video import Video, VideoProgress
 from app.models.conversation_lesson import ConversationLessonAttempt
+from app.models.ai_usage import AIUsageLog
 
 __all__ = [
 	"User",
@@ -13,4 +14,5 @@ __all__ = [
 	"Video",
 	"VideoProgress",
 	"ConversationLessonAttempt",
+    "AIUsageLog",
 ]

@@ -9,6 +9,7 @@ Voices supported by OpenAI TTS (as of current SDK): alloy, echo, fable, onyx, no
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Literal, cast
+import math
 
 import httpx
 
@@ -25,7 +26,21 @@ except Exception:  # pragma: no cover
 class OpenAITTSService:
     DEFAULT_MODEL = "tts-1"
     DEFAULT_VOICE = "nova"
+    DEFAULT_SPEED = 0.88
     SUPPORTED_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+
+    @staticmethod
+    def _normalize_speed(value: Any, default: float = DEFAULT_SPEED) -> float:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            parsed = float(default)
+
+        if not math.isfinite(parsed):
+            parsed = float(default)
+
+        bounded = max(0.65, min(1.05, parsed))
+        return round(bounded, 2)
 
     def __init__(self) -> None:
         settings = get_settings()
@@ -33,6 +48,7 @@ class OpenAITTSService:
         self.lemonfox_api_key = getattr(settings, "lemonfox_api_key", "")
         self.lemonfox_base_url = (getattr(settings, "lemonfox_base_url", "") or "https://api.lemonfox.ai/v1").strip()
         self.lemonfox_enabled = bool(getattr(settings, "lemonfox_enabled", False))
+        self.default_speed = self._normalize_speed(getattr(settings, "openai_tts_speed", self.DEFAULT_SPEED))
         # Important: force a TTS base_url so we don't inherit any OpenAI-compatible LLM base_url
         # (e.g. DeepSeek) from environment variables.
         self.base_url = (getattr(settings, "openai_tts_base_url", "") or "https://api.openai.com/v1").strip()
@@ -123,7 +139,7 @@ class OpenAITTSService:
                     "voice": voice,
                     "response_format": "mp3",
                     "language": "en-us",
-                    "speed": 0.95,
+                    "speed": self.default_speed,
                 },
                 timeout=60.0,
             )
@@ -156,8 +172,7 @@ class OpenAITTSService:
                     model=model_name,
                     voice=voice_literal,
                     input=safe_text,
-                    # Slightly slower helps learners.
-                    speed=0.95,
+                    speed=self.default_speed,
                 )
 
                 return response.content

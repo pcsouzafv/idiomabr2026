@@ -24,6 +24,7 @@ interface UserStats {
   words_learned: number;
   longest_streak: number;
   games_played: number;
+  perfect_games: number;
   best_quiz_score: number;
   best_matching_time: number;
   level: number;
@@ -93,11 +94,10 @@ export default function AchievementsPage() {
       case 'games':
         return Math.min(100, (stats.games_played / achievement.requirement) * 100);
       case 'perfect':
-        const perfectCount = 0; // TODO: Track perfect scores
-        return Math.min(100, (perfectCount / achievement.requirement) * 100);
+        return Math.min(100, (stats.perfect_games / achievement.requirement) * 100);
       case 'speed':
         if (!stats.best_matching_time) return 0;
-        return stats.best_matching_time <= achievement.requirement ? 100 : 0;
+        return Math.min(100, (achievement.requirement / stats.best_matching_time) * 100);
       case 'level':
         return Math.min(100, (stats.level / achievement.requirement) * 100);
       default:
@@ -116,7 +116,7 @@ export default function AchievementsPage() {
       case 'games':
         return stats.games_played;
       case 'perfect':
-        return 0; // TODO: Track perfect scores
+        return stats.perfect_games;
       case 'speed':
         return stats.best_matching_time || 0;
       case 'level':
@@ -264,6 +264,11 @@ export default function AchievementsPage() {
                   const unlocked = isUnlocked(achievement.id);
                   const progress = getProgress(achievement);
                   const currentValue = getCurrentValue(achievement);
+                  const progressValue = Math.max(0, Math.min(100, progress));
+                  const progressLabel =
+                    achievement.type === 'speed'
+                      ? `${currentValue ? `${currentValue}s` : '--'} / ${achievement.requirement}s`
+                      : `${currentValue} / ${achievement.requirement}`;
 
                   return (
                     <div
@@ -295,14 +300,12 @@ export default function AchievementsPage() {
                         <div className="mb-3">
                           <div className="flex justify-between text-xs text-gray-500 mb-1">
                             <span>Progresso</span>
-                            <span>
-                              {currentValue} / {achievement.requirement}
-                            </span>
+                            <span>{progressLabel}</span>
                           </div>
                           <progress
                             className={`w-full h-2 ${progressAccent}`}
-                            value={Math.max(0, Math.min(achievement.requirement, currentValue))}
-                            max={Math.max(achievement.requirement, 1)}
+                            value={progressValue}
+                            max={100}
                             aria-label={`Progresso: ${achievement.name}`}
                           />
                           <div className="sr-only">{Math.round(progress)}%</div>

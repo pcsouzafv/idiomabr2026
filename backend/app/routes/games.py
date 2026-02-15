@@ -4,7 +4,8 @@ Rotas para jogos interativos: Quiz, Hangman, Matching, Dictation.
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import Optional
+from typing import Optional, Any
+from collections import Counter
 import random
 import uuid
 import math
@@ -19,9 +20,10 @@ from app.models.user import User
 from app.models.word import Word
 from app.models.review import Review
 from app.models.progress import UserProgress
-from app.models.gamification import UserStats, GameSession, Achievement, UserAchievement
+from app.models.gamification import UserStats, GameSession
 from app.models.sentence import Sentence
 from app.services.spaced_repetition import calculate_next_review
+from app.services.achievements import check_and_unlock_achievements
 from app.services.ai_teacher import ai_teacher_service
 from app.services.session_store import get_session_store
 from app.schemas.games import (
@@ -210,6 +212,117 @@ def _normalize_grammar_token(token: str) -> str:
     return re.sub(r"[^a-zA-Z']", "", token).strip().lower()
 
 
+def _dedupe_keep_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        normalized = value.strip().lower()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(value.strip())
+    return result
+
+
+def _format_token_list(values: list[str], max_items: int = 6) -> str:
+    if not values:
+        return "-"
+    unique = _dedupe_keep_order(values)
+    if not unique:
+        return "-"
+    if len(unique) <= max_items:
+        return ", ".join(unique)
+    return ", ".join(unique[:max_items]) + ", ..."
+
+
+def _build_grammar_error_feedback(
+    *,
+    expected_sentence: str,
+    user_sentence: str,
+    expected_tokens: list[str],
+    user_tokens: list[str],
+    tip: str,
+    base_explanation: str,
+    tense: Optional[str],
+    grammar_points: list[str],
+) -> dict[str, Any]:
+    expected_clean = [t.strip() for t in expected_tokens if str(t).strip()]
+    user_clean = [t.strip() for t in user_tokens if str(t).strip()]
+
+    expected_norm = [_normalize_grammar_token(t) for t in expected_clean if _normalize_grammar_token(t)]
+    user_norm = [_normalize_grammar_token(t) for t in user_clean if _normalize_grammar_token(t)]
+
+    expected_counter = Counter(expected_norm)
+    user_counter = Counter(user_norm)
+
+    missing_tokens: list[str] = []
+    for token, count in expected_counter.items():
+        diff = count - user_counter.get(token, 0)
+        if diff > 0:
+            missing_tokens.extend([token] * diff)
+
+    extra_tokens: list[str] = []
+    for token, count in user_counter.items():
+        diff = count - expected_counter.get(token, 0)
+        if diff > 0:
+            extra_tokens.extend([token] * diff)
+
+    first_diff_index: Optional[int] = None
+    compared = min(len(expected_norm), len(user_norm))
+    for idx in range(compared):
+        if expected_norm[idx] != user_norm[idx]:
+            first_diff_index = idx
+            break
+    if first_diff_index is None and len(expected_norm) != len(user_norm):
+        first_diff_index = compared
+
+    first_mismatch = ""
+    if first_diff_index is not None:
+        expected_at = expected_clean[first_diff_index] if first_diff_index < len(expected_clean) else "(fim da frase)"
+        user_at = user_clean[first_diff_index] if first_diff_index < len(user_clean) else "(fim da frase)"
+        first_mismatch = (
+            f"Na posição {first_diff_index + 1}, o esperado era \"{expected_at}\", "
+            f"mas apareceu \"{user_at}\"."
+        )
+
+    tense_hints = {
+        "present": "No presente simples, mantenha o verbo principal na forma base (ou com -s na 3ª pessoa).",
+        "past": "No passado, confirme se o verbo principal está no passado (ou se há auxiliar correto).",
+        "future": "No futuro, use a estrutura com auxiliar (ex.: will + verbo base) sem alterar o verbo principal.",
+    }
+
+    details: list[str] = [
+        f"Frase-alvo: \"{expected_sentence}\".",
+        f"Sua versão: \"{user_sentence or '(vazio)'}\".",
+    ]
+    if missing_tokens:
+        details.append(f"Faltaram estes elementos: {_format_token_list(missing_tokens)}.")
+    if extra_tokens:
+        details.append(f"Você adicionou elementos extras/fora de ordem: {_format_token_list(extra_tokens)}.")
+    if first_mismatch:
+        details.append(first_mismatch)
+    if grammar_points:
+        details.append(f"Ponto gramatical foco: {_format_token_list(grammar_points)}.")
+        point_hints = _grammar_point_hints(grammar_points)
+        if point_hints:
+            details.append(f"Regra do foco: {point_hints[0]}")
+    if tip:
+        details.append(f"Dica prática: {tip}")
+    if base_explanation:
+        details.append(f"Regra: {base_explanation}")
+    tense_hint = tense_hints.get((tense or "").strip().lower())
+    if tense_hint:
+        details.append(tense_hint)
+    details.append("Para corrigir, comece pelo sujeito, depois verbo, e só então complete com objetos/adverbios.")
+
+    return {
+        "missing_tokens": _dedupe_keep_order(missing_tokens),
+        "extra_tokens": _dedupe_keep_order(extra_tokens),
+        "first_mismatch": first_mismatch,
+        "detailed_explanation": " ".join(details).strip(),
+    }
+
+
 def _parse_grammar_points(raw: Optional[str]) -> list[str]:
     if not raw:
         return []
@@ -221,19 +334,253 @@ def _parse_grammar_points(raw: Optional[str]) -> list[str]:
             return [parsed.strip()] if parsed.strip() else []
     except Exception:
         pass
-    # Fallback: split by comma
-    return [p.strip() for p in str(raw).split(',') if p.strip()]
+    fallback_chunks = re.split(r"[;,|]", str(raw))
+    return [p.strip() for p in fallback_chunks if p.strip()]
 
 
-def _extract_sentence_tense(grammar_points: list[str]) -> Optional[str]:
+def _grammar_point_hints(grammar_points: list[str]) -> list[str]:
     joined = " ".join(grammar_points).lower()
-    if "past" in joined:
-        return "past"
-    if "future" in joined:
+    hints: list[str] = []
+
+    marker_map: list[tuple[list[str], str]] = [
+        (["present simple", "simple present"], "Present Simple: use o verbo principal na forma base para hábitos e rotinas."),
+        (["present continuous", "present progressive"], "Present Continuous: use am/is/are + verbo com -ing para ações em andamento."),
+        (["present perfect"], "Present Perfect: use have/has + particípio para experiência ou ligação com o presente."),
+        (["present perfect continuous"], "Present Perfect Continuous: use have/has been + verbo com -ing para duração até o presente."),
+        (["past simple", "simple past"], "Past Simple: use verbo no passado para ação concluída em momento específico."),
+        (["past continuous"], "Past Continuous: use was/were + verbo com -ing para ação em progresso no passado."),
+        (["past perfect"], "Past Perfect: use had + particípio para algo que aconteceu antes de outro evento passado."),
+        (["past perfect continuous"], "Past Perfect Continuous: use had been + verbo com -ing para duração antes de outro ponto no passado."),
+        (["future simple", "simple future"], "Future Simple: use will + verbo base para decisão, previsão ou promessa."),
+        (["going to"], "Be going to: use am/is/are going to + verbo base para planos e previsões com evidência."),
+        (["future continuous"], "Future Continuous: use will be + verbo com -ing para ação em progresso no futuro."),
+        (["future perfect"], "Future Perfect: use will have + particípio para algo concluído antes de um momento futuro."),
+        (["future perfect continuous"], "Future Perfect Continuous: use will have been + verbo com -ing para duração até um ponto futuro."),
+        (["modal"], "Modais (can, should, must etc.) vêm antes do verbo principal na forma base."),
+        (["passive", "voz passiva"], "Voz passiva: mantenha be + particípio, com foco na ação e não no agente."),
+        (["zero conditional"], "Zero Conditional: if + presente, presente para fatos gerais."),
+        (["first conditional"], "First Conditional: if + presente, will + verbo para possibilidade futura."),
+        (["second conditional"], "Second Conditional: if + passado, would + verbo para hipótese no presente."),
+        (["third conditional"], "Third Conditional: if + past perfect, would have + particípio para hipótese no passado."),
+    ]
+
+    for markers, hint in marker_map:
+        if any(marker in joined for marker in markers):
+            hints.append(hint)
+
+    return _dedupe_keep_order(hints)
+
+
+def _extract_sentence_tense(
+    grammar_points: list[str],
+    sentence_en: Optional[str] = None,
+) -> Optional[str]:
+    joined = " ".join(grammar_points).lower()
+    sentence = _normalize_sentence(sentence_en or "")
+    combined = f"{joined} {sentence}".strip()
+
+    if not combined:
+        return None
+
+    # Future tense / future-aspect structures
+    if (
+        "future" in combined
+        or re.search(r"\b(will|shall|won't|gonna)\b", combined)
+        or re.search(r"\b(am|is|are)\s+going\s+to\b", combined)
+        or re.search(r"\bnext\s+\w+\b", combined)
+        or re.search(r"\btomorrow\b", combined)
+    ):
         return "future"
-    if "present" in joined:
+
+    # Present perfect / present continuous markers
+    if (
+        "present" in combined
+        or re.search(r"\b(am|is|are)\s+\w+ing\b", sentence)
+        or re.search(r"\b(has|have)\s+been\s+\w+ing\b", sentence)
+        or re.search(r"\b(has|have)\s+\w+(ed|en|wn|ne|lt|t)\b", sentence)
+        or re.search(r"\b(usually|always|often|every)\b", sentence)
+    ):
         return "present"
+
+    # Past forms and time markers
+    if (
+        "past" in combined
+        or re.search(r"\b(was|were|had|did|didn't)\b", sentence)
+        or re.search(r"\b(yesterday|ago|last\s+\w+)\b", sentence)
+        or re.search(r"\bin\s+\d{4}\b", sentence)
+        or re.search(r"\b\w+ed\b", sentence)
+    ):
+        return "past"
+
+    # Plain affirmative sentences without clear markers are usually present simple.
+    if sentence:
+        return "present"
+
     return None
+
+
+def _infer_grammar_points_from_sentence(
+    sentence_en: str,
+    tense_value: Optional[str],
+) -> list[str]:
+    sentence = _normalize_sentence(sentence_en or "")
+    points: list[str] = []
+
+    if re.search(r"\b(am|is|are)\s+\w+ing\b", sentence):
+        points.append("present continuous")
+    if re.search(r"\b(was|were)\s+\w+ing\b", sentence):
+        points.append("past continuous")
+    if re.search(r"\b(has|have)\s+been\s+\w+ing\b", sentence):
+        points.append("present perfect continuous")
+    if re.search(r"\bhad\s+been\s+\w+ing\b", sentence):
+        points.append("past perfect continuous")
+    if re.search(r"\b(has|have)\s+\w+(ed|en|wn|ne|lt|t)\b", sentence):
+        points.append("present perfect")
+    if re.search(r"\bhad\s+\w+(ed|en|wn|ne|lt|t)\b", sentence):
+        points.append("past perfect")
+    if re.search(r"\b(am|is|are)\s+going\s+to\b", sentence):
+        points.append("be going to")
+        points.append("future")
+    if re.search(r"\bwill\s+be\s+\w+ing\b", sentence):
+        points.append("future continuous")
+    if re.search(r"\bwill\s+have\s+been\s+\w+ing\b", sentence):
+        points.append("future perfect continuous")
+    if re.search(r"\bwill\s+have\s+\w+(ed|en|wn|ne|lt|t)\b", sentence):
+        points.append("future perfect")
+    if re.search(r"\b(will|shall)\b", sentence):
+        points.append("future simple")
+    if re.search(r"\b(can|could|may|might|must|should|would|shall)\b", sentence):
+        points.append("modal verbs")
+    if re.search(r"\bif\b", sentence):
+        if re.search(r"\bif\b.*\bwill\b|\bwill\b.*\bif\b", sentence):
+            points.append("first conditional")
+        elif re.search(r"\bif\b.*\bhad\b.*\bwould have\b", sentence):
+            points.append("third conditional")
+        elif re.search(r"\bif\b.*\bwould\b", sentence):
+            points.append("second conditional")
+        else:
+            points.append("conditional sentence")
+    if re.search(r"\b(be|am|is|are|was|were|been)\s+\w+(ed|en|wn|ne|lt|t)\b", sentence):
+        points.append("passive voice")
+
+    if not points and tense_value == "past":
+        points.append("past simple")
+    elif not points and tense_value == "future":
+        points.append("future simple")
+    elif not points:
+        points.append("present simple")
+
+    return _dedupe_keep_order(points)
+
+
+def _cefr_levels_for_grammar_level(level: Optional[int]) -> list[str]:
+    if level == 1:
+        return ["A1"]
+    if level == 2:
+        return ["A2"]
+    if level == 3:
+        return ["B1", "B2", "C1", "C2"]
+    return []
+
+
+def _grammar_difficulty_for_level(level: Optional[str]) -> float:
+    mapping = {
+        "A1": 1.0,
+        "A2": 2.0,
+        "B1": 3.5,
+        "B2": 5.0,
+        "C1": 6.5,
+        "C2": 8.0,
+    }
+    normalized = (level or "").strip().upper()
+    return mapping.get(normalized, 2.0)
+
+
+def _is_low_quality_grammar_sentence(sentence_en: str, sentence_pt: str) -> bool:
+    normalized_en = f" {_normalize_sentence(sentence_en)} "
+    normalized_pt = f" {_normalize_sentence(sentence_pt)} "
+
+    if not normalized_en.strip() or not normalized_pt.strip():
+        return True
+
+    # Bloqueia pares semânticos incoerentes comuns em frases geradas/ruins.
+    non_food_places = [
+        " hardware store ",
+        " bookstore ",
+        " library ",
+        " bank ",
+        " office ",
+    ]
+    food_items = [
+        " eggs ",
+        " milk ",
+        " bread ",
+        " cheese ",
+        " rice ",
+        " beans ",
+        " meat ",
+        " apple ",
+        " apples ",
+        " banana ",
+        " bananas ",
+    ]
+    if any(place in normalized_en for place in non_food_places) and any(item in normalized_en for item in food_items):
+        return True
+
+    food_places = [
+        " supermarket ",
+        " grocery store ",
+        " market ",
+        " bakery ",
+        " butcher ",
+    ]
+    hardware_items = [
+        " hammer ",
+        " nails ",
+        " screwdriver ",
+        " wrench ",
+        " drill ",
+        " screws ",
+    ]
+    if any(place in normalized_en for place in food_places) and any(item in normalized_en for item in hardware_items):
+        return True
+
+    # Heurística para pt-BR também (quando o EN veio aceitável, mas PT ficou absurdo).
+    pt_hardware_places = [" loja de ferragens ", " biblioteca ", " banco "]
+    pt_food_items = [" ovos ", " leite ", " pao ", " carne ", " arroz ", " feijao "]
+    if any(place in normalized_pt for place in pt_hardware_places) and any(item in normalized_pt for item in pt_food_items):
+        return True
+
+    return False
+
+
+def _collect_grammar_candidates(
+    rows: list[Sentence],
+    chosen_tense: str,
+) -> list[tuple[Sentence, str, list[str], Optional[str]]]:
+    candidates_with_meta: list[tuple[Sentence, str, list[str], Optional[str]]] = []
+    for sentence in rows:
+        sentence_en = (sentence.english or "").strip()
+        sentence_pt = _sanitize_sentence_pt(sentence.portuguese or "")
+        if not sentence_en or not sentence_pt:
+            continue
+        if _is_low_quality_grammar_sentence(sentence_en, sentence_pt):
+            continue
+
+        grammar_points = _parse_grammar_points(sentence.grammar_points)
+        tense_value = _extract_sentence_tense(grammar_points, sentence_en)
+        if not grammar_points:
+            grammar_points = _infer_grammar_points_from_sentence(sentence_en, tense_value)
+        elif not _grammar_point_hints(grammar_points):
+            grammar_points = _dedupe_keep_order(
+                grammar_points + _infer_grammar_points_from_sentence(sentence_en, tense_value)
+            )
+
+        if chosen_tense and tense_value != chosen_tense:
+            continue
+
+        candidates_with_meta.append((sentence, sentence_pt, grammar_points, tense_value))
+    return candidates_with_meta
 
 
 def _map_sentence_level_to_numeric(level: Optional[str]) -> int:
@@ -271,6 +618,92 @@ def _extract_json_object(text: str) -> Optional[dict]:
     return None
 
 
+def _grammar_guidance_is_off_topic(text: str) -> bool:
+    lowered = (text or "").lower()
+    if not lowered:
+        return True
+
+    banned_markers = [
+        "feminine places",
+        "masculine places",
+        "em português",
+        "in portuguese",
+        "portuguese grammar",
+        "gramática do português",
+        "vou ao",
+        "vou à",
+        "ao meio-dia",
+        "masculino",
+        "feminino",
+        "contração ao",
+        "contração à",
+        "a + a",
+        "a + as",
+    ]
+    return any(marker in lowered for marker in banned_markers)
+
+
+def _build_default_grammar_tip_explanation(
+    *,
+    sentence_en: str,
+    grammar_points: list[str],
+    tense_value: Optional[str],
+    fallback_tip: str,
+    fallback_explanation: str,
+) -> tuple[str, str]:
+    normalized_sentence = " ".join((sentence_en or "").strip().split())
+    lowered = f" {normalized_sentence.lower()} "
+    attention_points: list[str] = []
+
+    if " to the " in lowered:
+        attention_points.append("Use `to the` antes do lugar (ex.: `to the bookstore`).")
+    elif re.search(r"\bto\s+[a-z]", lowered):
+        attention_points.append("Use `to` para indicar destino/movimento.")
+
+    if re.search(r"\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", lowered):
+        attention_points.append("Use `on` antes de dia da semana (ex.: `on Monday`).")
+
+    if re.search(r"\bat\s+(\d{1,2}(:\d{2})?\s*(a\.m\.|p\.m\.)|noon|midnight)\b", lowered):
+        attention_points.append("Use `at` para horário específico (ex.: `at 7:00 a.m.` / `at noon`).")
+
+    if re.search(r"\bthe\s+[a-z]", lowered):
+        attention_points.append("Mantenha o artigo `the` imediatamente antes do substantivo.")
+
+    tense_hints = {
+        "present": "No presente simples em inglês, mantenha verbo principal e ordem fixa da frase.",
+        "past": "No passado, confirme a forma verbal correta e mantenha os auxiliares na posição certa.",
+        "future": "No futuro, use auxiliar + verbo base (ex.: `will` + verbo) sem inverter a ordem.",
+    }
+    grammar_hints = _grammar_point_hints(grammar_points)
+
+    default_tip = "Em inglês, mantenha a ordem Subject + Verb + Complement."
+    if attention_points:
+        default_tip = attention_points[0]
+    elif grammar_hints:
+        default_tip = grammar_hints[0]
+    if fallback_tip and not _grammar_guidance_is_off_topic(fallback_tip):
+        default_tip = fallback_tip
+
+    details: list[str] = [
+        f"Frase correta em inglês: \"{normalized_sentence}\".",
+        "Foque na ordem em inglês: sujeito + verbo + complementos.",
+    ]
+    tense_hint = tense_hints.get((tense_value or "").strip().lower())
+    if tense_hint:
+        details.append(tense_hint)
+    if attention_points:
+        details.append("Pontos de atenção: " + " ".join(attention_points[:3]))
+    if grammar_points:
+        details.append(f"Foco gramatical: {_format_token_list(grammar_points)}.")
+    if grammar_hints:
+        details.append("Guia do tempo/estrutura: " + " ".join(grammar_hints[:2]))
+    if fallback_explanation and not _grammar_guidance_is_off_topic(fallback_explanation):
+        details.append(f"Regra adicional: {fallback_explanation}")
+    details.append("Exemplo semelhante: I go to the gym at 8:00 a.m. on Monday.")
+
+    return default_tip, " ".join(details).strip()
+
+
 async def _generate_grammar_tip_explanation(
     *,
     sentence_en: str,
@@ -284,21 +717,36 @@ async def _generate_grammar_tip_explanation(
     fallback_tip: str,
     fallback_explanation: str,
 ) -> tuple[str, str]:
+    default_tip, default_explanation = _build_default_grammar_tip_explanation(
+        sentence_en=sentence_en,
+        grammar_points=grammar_points,
+        tense_value=tense_value,
+        fallback_tip=fallback_tip,
+        fallback_explanation=fallback_explanation,
+    )
+
     system_prompt = (
-        "You are an expert English teacher for Brazilian Portuguese students. "
-        "Generate concise learning guidance for a sentence-building exercise. "
-        "Return JSON only with keys: tip, explanation. "
-        "tip: 1 short sentence. explanation: 2-4 short sentences in Portuguese, "
-        "include word order, verb form, and 1 mini example if useful."
+        "Você é uma professora de gramática de inglês para brasileiros. "
+        "O exercício é de montar frase em INGLÊS com tokens embaralhados. "
+        "Explique SOMENTE gramática e ordem da frase em inglês. "
+        "NÃO ensine gramática do português, gênero de substantivo, nem contrações como ao/à/às. "
+        "Responda em pt-BR. "
+        "Retorne JSON somente com as chaves: tip, explanation. "
+        "tip: 1 frase curta (máximo 14 palavras). "
+        "explanation: 3-6 frases curtas, práticas, citando onde ficam artigos/preposições/tempo."
     )
 
     user_prompt = (
         f"Sentence (EN): {sentence_en}\n"
-        f"Sentence (PT): {sentence_pt}\n"
+        f"Sentence (PT - apenas contexto de significado): {sentence_pt}\n"
         f"CEFR level: {level or 'unknown'}\n"
         f"Tense: {tense_value or 'unknown'}\n"
         f"Grammar points: {', '.join(grammar_points) if grammar_points else 'none'}\n"
         f"Topic: {category or 'general'}\n\n"
+        "Restrições:\n"
+        "- Não mencionar regras de português.\n"
+        "- Não falar de masculino/feminino em português.\n"
+        "- Focar em ordem e conectores do inglês (ex.: to, the, on, at).\n"
         "Return JSON only."
     )
 
@@ -309,18 +757,19 @@ async def _generate_grammar_tip_explanation(
                 {"role": "user", "content": user_prompt},
             ],
             db=db,
-            cache_operation="grammar_builder.tip.v1",
+            cache_operation="grammar_builder.tip.v3",
             cache_scope=f"sentence:{sentence_id}",
         )
         data = _extract_json_object(ai.get("response", "")) or {}
         tip_value = str(data.get("tip") or "").strip()
         explanation_value = str(data.get("explanation") or "").strip()
-        if tip_value and explanation_value:
+        combined = f"{tip_value} {explanation_value}".strip()
+        if tip_value and explanation_value and not _grammar_guidance_is_off_topic(combined):
             return tip_value, explanation_value
     except Exception as exc:
         print(f"[WARN] Grammar AI tip failed: {exc}")
 
-    return fallback_tip, fallback_explanation
+    return default_tip, default_explanation
 
 
 async def _generate_sentence_pt_ai(
@@ -366,138 +815,509 @@ async def _generate_sentence_pt_ai(
     return sentence_pt
 
 
-GRAMMAR_SENTENCES = [
+GRAMMAR_SEED_SENTENCES: list[dict[str, Any]] = [
     {
-        "id": "g1",
-        "level": 1,
+        "english": "I go to the bookstore on Monday",
+        "portuguese": "Eu vou para a livraria na segunda-feira.",
+        "level": "A1",
         "tense": "present",
-        "portuguese": "Eu gosto de pizza.",
-        "english": "I like pizza",
-        "verb": "like",
-        "tip": "Sujeito + Verbo + Objeto (ordem básica SVO)",
-        "explanation": "Em inglês, a estrutura básica é sempre Sujeito (I) + Verbo (like) + Objeto (pizza).",
+        "category": "daily_life",
+        "grammar_points": ["present simple", "prepositions of time", "word order"],
     },
     {
-        "id": "g2",
-        "level": 1,
+        "english": "She studies English every night",
+        "portuguese": "Ela estuda ingles toda noite.",
+        "level": "A1",
         "tense": "present",
-        "portuguese": "Ela estuda inglês todos os dias.",
-        "english": "She studies English every day",
-        "verb": "studies",
-        "tip": "Sujeito + Verbo + Objeto + Tempo (SVO + When)",
-        "explanation": "O complemento de tempo (every day) vem sempre no final da frase.",
+        "category": "study",
+        "grammar_points": ["present simple", "third person -s"],
     },
     {
-        "id": "g3",
-        "level": 1,
+        "english": "We are eating lunch now",
+        "portuguese": "Nos estamos almocando agora.",
+        "level": "A1",
         "tense": "present",
-        "portuguese": "Nós jogamos futebol no parque.",
-        "english": "We play soccer at the park",
-        "verb": "play",
-        "tip": "Sujeito + Verbo + Objeto + Lugar (SVO + Where)",
-        "explanation": "O lugar (at the park) vem após o objeto.",
+        "category": "daily_life",
+        "grammar_points": ["present continuous"],
     },
     {
-        "id": "g4",
-        "level": 1,
+        "english": "They play soccer in the park",
+        "portuguese": "Eles jogam futebol no parque.",
+        "level": "A1",
         "tense": "present",
-        "portuguese": "Eles moram no Brasil.",
-        "english": "They live in Brazil",
-        "verb": "live",
-        "tip": "Sujeito + Verbo + Complemento de Lugar",
-        "explanation": "O verbo 'live' precisa da preposição 'in' para indicar o local.",
+        "category": "leisure",
+        "grammar_points": ["present simple", "prepositions of place"],
     },
     {
-        "id": "g5",
-        "level": 1,
+        "english": "He is watching TV at home",
+        "portuguese": "Ele esta assistindo TV em casa.",
+        "level": "A1",
         "tense": "present",
-        "portuguese": "O cachorro corre rápido.",
-        "english": "The dog runs fast",
-        "verb": "runs",
-        "tip": "Sujeito + Verbo + Advérbio (como o verbo é executado)",
-        "explanation": "O advérbio 'fast' descreve como o cachorro corre e vem após o verbo.",
+        "category": "daily_life",
+        "grammar_points": ["present continuous"],
     },
     {
-        "id": "g6",
-        "level": 1,
+        "english": "Do you drink coffee in the morning",
+        "portuguese": "Voce bebe cafe de manha?",
+        "level": "A1",
         "tense": "present",
-        "portuguese": "Você bebe água?",
-        "english": "Do you drink water",
-        "verb": "do drink",
-        "tip": "Perguntas no presente: Do + sujeito + verbo base",
-        "explanation": "Para perguntas no presente, use 'Do' antes do sujeito.",
+        "category": "daily_life",
+        "grammar_points": ["present simple questions", "auxiliary do"],
     },
     {
-        "id": "g7",
-        "level": 2,
-        "tense": "present",
-        "portuguese": "Eu realmente gosto de café brasileiro.",
-        "english": "I really like Brazilian coffee",
-        "verb": "like",
-        "tip": "Advérbio vem antes do verbo principal",
-        "explanation": "O advérbio 'really' fica entre o sujeito e o verbo.",
-    },
-    {
-        "id": "g8",
-        "level": 2,
-        "tense": "present",
-        "portuguese": "Ela está lendo um livro agora.",
-        "english": "She is reading a book now",
-        "verb": "is reading",
-        "tip": "Presente contínuo: am/is/are + verbo-ing",
-        "explanation": "Para ações acontecendo agora, use 'to be' + verbo com -ing.",
-    },
-    {
-        "id": "g9",
-        "level": 2,
-        "tense": "present",
-        "portuguese": "Nós sempre tomamos café da manhã juntos.",
-        "english": "We always have breakfast together",
-        "verb": "have",
-        "tip": "Advérbios de frequência vêm antes do verbo principal",
-        "explanation": "'Always' fica antes do verbo 'have'.",
-    },
-    {
-        "id": "g10",
-        "level": 3,
-        "tense": "present",
-        "portuguese": "Eu tenho estudado inglês por três anos.",
-        "english": "I have been studying English for three years",
-        "verb": "have been studying",
-        "tip": "Present Perfect Continuous: have/has + been + verbo-ing",
-        "explanation": "Ação que começou no passado e continua até agora.",
-    },
-    {
-        "id": "g11",
-        "level": 3,
-        "tense": "present",
-        "portuguese": "Eles não comem carne há cinco anos.",
-        "english": "They haven't eaten meat for five years",
-        "verb": "haven't eaten",
-        "tip": "Present Perfect negativo: have/has + not + particípio",
-        "explanation": "Indica que algo não ocorreu durante um período até agora.",
-    },
-    {
-        "id": "g12",
-        "level": 3,
-        "tense": "future",
-        "portuguese": "Ela trabalhará na biblioteca amanhã de manhã.",
-        "english": "She will work at the library tomorrow morning",
-        "verb": "will work",
-        "tip": "Futuro simples: will + verbo base (Lugar + Tempo)",
-        "explanation": "Use 'will' + verbo base. Lugar vem antes de tempo.",
-    },
-    {
-        "id": "g13",
-        "level": 3,
+        "english": "I went to the bookstore yesterday",
+        "portuguese": "Eu fui para a livraria ontem.",
+        "level": "A1",
         "tense": "past",
-        "portuguese": "Eu estava dormindo quando você ligou.",
-        "english": "I was sleeping when you called",
-        "verb": "was sleeping",
-        "tip": "Past Continuous: was/were + verbo-ing",
-        "explanation": "Ação em progresso no passado interrompida por outra.",
+        "category": "daily_life",
+        "grammar_points": ["past simple", "irregular verbs"],
+    },
+    {
+        "english": "She studied English last night",
+        "portuguese": "Ela estudou ingles ontem a noite.",
+        "level": "A1",
+        "tense": "past",
+        "category": "study",
+        "grammar_points": ["past simple"],
+    },
+    {
+        "english": "We were eating lunch when he arrived",
+        "portuguese": "Nos estavamos almocando quando ele chegou.",
+        "level": "A1",
+        "tense": "past",
+        "category": "daily_life",
+        "grammar_points": ["past continuous", "past simple"],
+    },
+    {
+        "english": "They played soccer on Saturday",
+        "portuguese": "Eles jogaram futebol no sabado.",
+        "level": "A1",
+        "tense": "past",
+        "category": "leisure",
+        "grammar_points": ["past simple", "prepositions of time"],
+    },
+    {
+        "english": "He watched TV after dinner",
+        "portuguese": "Ele assistiu TV depois do jantar.",
+        "level": "A1",
+        "tense": "past",
+        "category": "daily_life",
+        "grammar_points": ["past simple"],
+    },
+    {
+        "english": "Did you drink coffee this morning",
+        "portuguese": "Voce bebeu cafe esta manha?",
+        "level": "A1",
+        "tense": "past",
+        "category": "daily_life",
+        "grammar_points": ["past simple questions", "auxiliary did"],
+    },
+    {
+        "english": "I will go to the bookstore tomorrow",
+        "portuguese": "Eu irei para a livraria amanha.",
+        "level": "A1",
+        "tense": "future",
+        "category": "daily_life",
+        "grammar_points": ["future simple", "will"],
+    },
+    {
+        "english": "She will study English tonight",
+        "portuguese": "Ela vai estudar ingles hoje a noite.",
+        "level": "A1",
+        "tense": "future",
+        "category": "study",
+        "grammar_points": ["future simple", "will"],
+    },
+    {
+        "english": "We are going to eat lunch at noon",
+        "portuguese": "Nos vamos almocar ao meio-dia.",
+        "level": "A1",
+        "tense": "future",
+        "category": "daily_life",
+        "grammar_points": ["be going to", "future plans"],
+    },
+    {
+        "english": "They will play soccer next Saturday",
+        "portuguese": "Eles vao jogar futebol no proximo sabado.",
+        "level": "A1",
+        "tense": "future",
+        "category": "leisure",
+        "grammar_points": ["future simple", "time expressions"],
+    },
+    {
+        "english": "He is going to watch TV later",
+        "portuguese": "Ele vai assistir TV mais tarde.",
+        "level": "A1",
+        "tense": "future",
+        "category": "daily_life",
+        "grammar_points": ["be going to", "future intentions"],
+    },
+    {
+        "english": "Will you drink coffee tomorrow morning",
+        "portuguese": "Voce vai beber cafe amanha de manha?",
+        "level": "A1",
+        "tense": "future",
+        "category": "daily_life",
+        "grammar_points": ["future simple questions", "will"],
+    },
+    {
+        "english": "I usually take the bus to work",
+        "portuguese": "Eu geralmente pego o onibus para o trabalho.",
+        "level": "A2",
+        "tense": "present",
+        "category": "work",
+        "grammar_points": ["present simple", "frequency adverbs"],
+    },
+    {
+        "english": "She is meeting her friend tomorrow",
+        "portuguese": "Ela vai encontrar a amiga amanha.",
+        "level": "A2",
+        "tense": "present",
+        "category": "conversation",
+        "grammar_points": ["present continuous for future"],
+    },
+    {
+        "english": "We have finished our homework",
+        "portuguese": "Nos terminamos nossa tarefa.",
+        "level": "A2",
+        "tense": "present",
+        "category": "study",
+        "grammar_points": ["present perfect"],
+    },
+    {
+        "english": "They have been waiting for thirty minutes",
+        "portuguese": "Eles estao esperando ha trinta minutos.",
+        "level": "A2",
+        "tense": "present",
+        "category": "daily_life",
+        "grammar_points": ["present perfect continuous", "for + duration"],
+    },
+    {
+        "english": "He does not eat meat on Fridays",
+        "portuguese": "Ele nao come carne nas sextas-feiras.",
+        "level": "A2",
+        "tense": "present",
+        "category": "daily_life",
+        "grammar_points": ["present simple negative", "auxiliary does"],
+    },
+    {
+        "english": "Have you ever visited London",
+        "portuguese": "Voce ja visitou Londres alguma vez?",
+        "level": "A2",
+        "tense": "present",
+        "category": "travel",
+        "grammar_points": ["present perfect questions", "ever"],
+    },
+    {
+        "english": "I worked at that company in 2019",
+        "portuguese": "Eu trabalhei naquela empresa em 2019.",
+        "level": "A2",
+        "tense": "past",
+        "category": "work",
+        "grammar_points": ["past simple"],
+    },
+    {
+        "english": "She was studying when I called",
+        "portuguese": "Ela estava estudando quando eu liguei.",
+        "level": "A2",
+        "tense": "past",
+        "category": "study",
+        "grammar_points": ["past continuous", "past simple"],
+    },
+    {
+        "english": "We had already left before the rain started",
+        "portuguese": "Nos ja tinhamos saido antes da chuva comecar.",
+        "level": "A2",
+        "tense": "past",
+        "category": "daily_life",
+        "grammar_points": ["past perfect", "sequence of past events"],
+    },
+    {
+        "english": "They had been traveling for hours before the flight landed",
+        "portuguese": "Eles estavam viajando havia horas antes do voo pousar.",
+        "level": "A2",
+        "tense": "past",
+        "category": "travel",
+        "grammar_points": ["past perfect continuous"],
+    },
+    {
+        "english": "He did not see the message yesterday",
+        "portuguese": "Ele nao viu a mensagem ontem.",
+        "level": "A2",
+        "tense": "past",
+        "category": "conversation",
+        "grammar_points": ["past simple negative", "auxiliary did"],
+    },
+    {
+        "english": "Had you ever tried sushi before that day",
+        "portuguese": "Voce ja tinha provado sushi antes daquele dia?",
+        "level": "A2",
+        "tense": "past",
+        "category": "daily_life",
+        "grammar_points": ["past perfect questions", "ever"],
+    },
+    {
+        "english": "I will answer your email tonight",
+        "portuguese": "Eu vou responder seu email hoje a noite.",
+        "level": "A2",
+        "tense": "future",
+        "category": "work",
+        "grammar_points": ["future simple", "will"],
+    },
+    {
+        "english": "She is going to start a new course next month",
+        "portuguese": "Ela vai comecar um novo curso no proximo mes.",
+        "level": "A2",
+        "tense": "future",
+        "category": "study",
+        "grammar_points": ["be going to", "future plans"],
+    },
+    {
+        "english": "We will be flying to Rome this time tomorrow",
+        "portuguese": "Nos estaremos voando para Roma a esta hora amanha.",
+        "level": "A2",
+        "tense": "future",
+        "category": "travel",
+        "grammar_points": ["future continuous"],
+    },
+    {
+        "english": "They will have finished the project by Friday",
+        "portuguese": "Eles terao terminado o projeto ate sexta-feira.",
+        "level": "A2",
+        "tense": "future",
+        "category": "work",
+        "grammar_points": ["future perfect"],
+    },
+    {
+        "english": "He will have been working here for five years in June",
+        "portuguese": "Em junho ele tera estado trabalhando aqui por cinco anos.",
+        "level": "A2",
+        "tense": "future",
+        "category": "work",
+        "grammar_points": ["future perfect continuous"],
+    },
+    {
+        "english": "Are you going to visit your parents this weekend",
+        "portuguese": "Voce vai visitar seus pais neste fim de semana?",
+        "level": "A2",
+        "tense": "future",
+        "category": "conversation",
+        "grammar_points": ["be going to questions"],
+    },
+    {
+        "english": "You should see a doctor soon",
+        "portuguese": "Voce deveria consultar um medico em breve.",
+        "level": "B1",
+        "tense": "present",
+        "category": "conversation",
+        "grammar_points": ["modal verbs", "should"],
+    },
+    {
+        "english": "The report is being reviewed by the manager",
+        "portuguese": "O relatorio esta sendo revisado pelo gerente.",
+        "level": "B1",
+        "tense": "present",
+        "category": "work",
+        "grammar_points": ["passive voice", "present continuous passive"],
+    },
+    {
+        "english": "If you heat ice it melts",
+        "portuguese": "Se voce aquece gelo ele derrete.",
+        "level": "B1",
+        "tense": "present",
+        "category": "study",
+        "grammar_points": ["zero conditional"],
+    },
+    {
+        "english": "I have been studying English since 2021",
+        "portuguese": "Eu venho estudando ingles desde 2021.",
+        "level": "B2",
+        "tense": "present",
+        "category": "study",
+        "grammar_points": ["present perfect continuous", "since"],
+    },
+    {
+        "english": "She has already completed the final draft",
+        "portuguese": "Ela ja completou a versao final.",
+        "level": "B2",
+        "tense": "present",
+        "category": "work",
+        "grammar_points": ["present perfect", "already"],
+    },
+    {
+        "english": "The data is updated every hour",
+        "portuguese": "Os dados sao atualizados a cada hora.",
+        "level": "B1",
+        "tense": "present",
+        "category": "work",
+        "grammar_points": ["passive voice", "present simple passive"],
+    },
+    {
+        "english": "The book was written by a famous author",
+        "portuguese": "O livro foi escrito por um autor famoso.",
+        "level": "B1",
+        "tense": "past",
+        "category": "study",
+        "grammar_points": ["passive voice", "past simple passive"],
+    },
+    {
+        "english": "If I had more time I would learn German",
+        "portuguese": "Se eu tivesse mais tempo eu aprenderia alemao.",
+        "level": "B1",
+        "tense": "past",
+        "category": "study",
+        "grammar_points": ["second conditional"],
+    },
+    {
+        "english": "If I had studied harder I would have passed the exam",
+        "portuguese": "Se eu tivesse estudado mais eu teria passado na prova.",
+        "level": "B2",
+        "tense": "past",
+        "category": "study",
+        "grammar_points": ["third conditional"],
+    },
+    {
+        "english": "He had been working there for ten years before the company closed",
+        "portuguese": "Ele tinha trabalhado la por dez anos antes da empresa fechar.",
+        "level": "B2",
+        "tense": "past",
+        "category": "work",
+        "grammar_points": ["past perfect continuous"],
+    },
+    {
+        "english": "She had left before we arrived",
+        "portuguese": "Ela ja tinha saido antes de chegarmos.",
+        "level": "B1",
+        "tense": "past",
+        "category": "daily_life",
+        "grammar_points": ["past perfect"],
+    },
+    {
+        "english": "They were discussing the contract at 8 PM",
+        "portuguese": "Eles estavam discutindo o contrato as 8 da noite.",
+        "level": "B1",
+        "tense": "past",
+        "category": "work",
+        "grammar_points": ["past continuous"],
+    },
+    {
+        "english": "I think it will rain tonight",
+        "portuguese": "Eu acho que vai chover hoje a noite.",
+        "level": "B1",
+        "tense": "future",
+        "category": "conversation",
+        "grammar_points": ["future simple", "prediction"],
+    },
+    {
+        "english": "Look at those clouds it is going to rain",
+        "portuguese": "Olhe aquelas nuvens vai chover.",
+        "level": "B1",
+        "tense": "future",
+        "category": "conversation",
+        "grammar_points": ["be going to", "prediction with evidence"],
+    },
+    {
+        "english": "This time next week I will be presenting at the conference",
+        "portuguese": "Nesta hora na proxima semana eu estarei apresentando na conferencia.",
+        "level": "B2",
+        "tense": "future",
+        "category": "work",
+        "grammar_points": ["future continuous"],
+    },
+    {
+        "english": "By next year I will have completed my degree",
+        "portuguese": "Ate o proximo ano eu terei concluido meu curso.",
+        "level": "B2",
+        "tense": "future",
+        "category": "study",
+        "grammar_points": ["future perfect"],
+    },
+    {
+        "english": "In June I will have been living here for five years",
+        "portuguese": "Em junho eu terei morado aqui por cinco anos.",
+        "level": "C1",
+        "tense": "future",
+        "category": "daily_life",
+        "grammar_points": ["future perfect continuous"],
+    },
+    {
+        "english": "If it rains tomorrow I will stay home",
+        "portuguese": "Se chover amanha eu vou ficar em casa.",
+        "level": "B1",
+        "tense": "future",
+        "category": "daily_life",
+        "grammar_points": ["first conditional"],
     },
 ]
+
+
+def _seed_grammar_sentences_if_missing(
+    db: Session,
+    *,
+    chosen_tense: str,
+    chosen_level: Optional[int],
+) -> int:
+    level_filter = set(_cefr_levels_for_grammar_level(chosen_level))
+    relevant_seeds = [
+        seed
+        for seed in GRAMMAR_SEED_SENTENCES
+        if (not chosen_tense or seed["tense"] == chosen_tense)
+        and (not level_filter or seed["level"] in level_filter)
+    ]
+    if not relevant_seeds:
+        return 0
+
+    english_lowers = list({str(seed["english"]).strip().lower() for seed in relevant_seeds if str(seed["english"]).strip()})
+    if not english_lowers:
+        return 0
+
+    existing_rows = (
+        db.query(Sentence.english, Sentence.level)
+        .filter(func.lower(Sentence.english).in_(english_lowers))
+        .all()
+    )
+    existing_keys = {
+        (
+            _normalize_sentence(str(row[0])),
+            str(row[1] or "").strip().upper(),
+        )
+        for row in existing_rows
+        if row and str(row[0]).strip()
+    }
+
+    to_insert: list[Sentence] = []
+    for seed in relevant_seeds:
+        english = str(seed["english"]).strip()
+        portuguese = str(seed["portuguese"]).strip()
+        if not english or not portuguese:
+            continue
+        level_value = str(seed["level"]).strip().upper() or "A1"
+        sentence_key = (_normalize_sentence(english), level_value)
+        if sentence_key in existing_keys:
+            continue
+        to_insert.append(
+            Sentence(
+                english=english,
+                portuguese=portuguese,
+                level=level_value,
+                category=str(seed.get("category") or "grammar").strip() or "grammar",
+                grammar_points=json.dumps(seed.get("grammar_points") or [], ensure_ascii=False),
+                difficulty_score=_grammar_difficulty_for_level(str(seed["level"])),
+            )
+        )
+        existing_keys.add(sentence_key)
+
+    if not to_insert:
+        return 0
+
+    try:
+        db.add_all(to_insert)
+        db.commit()
+        return len(to_insert)
+    except Exception as exc:
+        db.rollback()
+        print(f"[WARN] Failed to seed grammar sentences: {exc}")
+        return 0
 
 
 def calculate_level(xp: int) -> int:
@@ -532,45 +1352,9 @@ def add_xp(db: Session, user_id: int, xp: int) -> UserStats:
     return stats
 
 
-def check_achievements(db: Session, user_id: int, stats: UserStats) -> list:
+def check_achievements(db: Session, user_id: int, _stats: UserStats) -> list:
     """Verifica e desbloqueia novas conquistas."""
-    new_achievements = []
-    
-    # Buscar conquistas não desbloqueadas
-    unlocked_ids = db.query(UserAchievement.achievement_id).filter(
-        UserAchievement.user_id == user_id
-    ).all()
-    unlocked_ids = [a[0] for a in unlocked_ids]
-    
-    achievements = db.query(Achievement).filter(
-        ~Achievement.id.in_(unlocked_ids) if unlocked_ids else True
-    ).all()
-    
-    for achievement in achievements:
-        unlocked = False
-        
-        if achievement.type == "words" and stats.words_learned >= achievement.requirement:
-            unlocked = True
-        elif achievement.type == "streak" and stats.longest_streak >= achievement.requirement:
-            unlocked = True
-        elif achievement.type == "games" and stats.games_played >= achievement.requirement:
-            unlocked = True
-        elif achievement.type == "level" and stats.level >= achievement.requirement:
-            unlocked = True
-        
-        if unlocked:
-            user_achievement = UserAchievement(
-                user_id=user_id,
-                achievement_id=achievement.id
-            )
-            db.add(user_achievement)
-            stats.total_xp += achievement.xp_reward  # type: ignore[misc]
-            new_achievements.append(achievement)
-    
-    if new_achievements:
-        db.commit()
-    
-    return new_achievements
+    return check_and_unlock_achievements(db, user_id)
 
 
 # ==================== QUIZ ====================
@@ -921,6 +1705,7 @@ def submit_sentence_builder(
     )
     db.add(game_session)
     db.commit()
+    new_achievements = check_achievements(db, current_user.id, stats)
 
     _delete_session(session_id)
 
@@ -930,6 +1715,7 @@ def submit_sentence_builder(
         percentage=percentage,
         xp_earned=xp,
         results=results,
+        new_achievements=new_achievements,
     )
 
 
@@ -947,51 +1733,56 @@ async def start_grammar_builder(
     """Inicia uma sessão de gramática focada em verbos e ordem da frase."""
     _cleanup_sessions()
 
+    valid_tenses = {"present", "past", "future"}
     chosen_tense = (tense or "").strip().lower()
+    if chosen_tense and chosen_tense not in valid_tenses:
+        chosen_tense = ""
     chosen_level = level if level in (1, 2, 3) else None
+    requested_count = max(1, min(num_sentences, 10))
 
     query = db.query(Sentence).filter(
         Sentence.english.isnot(None),
+        Sentence.english != "",
         Sentence.portuguese.isnot(None),
+        Sentence.portuguese != "",
     )
 
-    if chosen_level == 1:
-        query = query.filter(Sentence.level.in_(["A1"]))
-    elif chosen_level == 2:
-        query = query.filter(Sentence.level.in_(["A2"]))
-    elif chosen_level == 3:
-        query = query.filter(Sentence.level.in_(["B1", "B2", "C1", "C2"]))
+    cefr_levels = _cefr_levels_for_grammar_level(chosen_level)
+    if cefr_levels:
+        query = query.filter(Sentence.level.in_(cefr_levels))
 
     candidates = query.all()
+    candidates_with_meta = _collect_grammar_candidates(candidates, chosen_tense)
 
-    if chosen_tense:
-        filtered = []
-        for s in candidates:
-            sentence_pt = _sanitize_sentence_pt(s.portuguese or "")
-            if not sentence_pt:
-                continue
-            grammar_points = _parse_grammar_points(s.grammar_points)
-            tense_value = _extract_sentence_tense(grammar_points)
-            if tense_value == chosen_tense:
-                filtered.append((s, sentence_pt, grammar_points, tense_value))
-        candidates_with_meta = filtered
-    else:
-        candidates_with_meta = []
-        for s in candidates:
-            sentence_pt = _sanitize_sentence_pt(s.portuguese or "")
-            if not sentence_pt:
-                continue
-            grammar_points = _parse_grammar_points(s.grammar_points)
-            candidates_with_meta.append((s, sentence_pt, grammar_points, _extract_sentence_tense(grammar_points)))
+    if len(candidates_with_meta) < requested_count:
+        _seed_grammar_sentences_if_missing(
+            db,
+            chosen_tense=chosen_tense,
+            chosen_level=chosen_level,
+        )
+        candidates = query.all()
+        candidates_with_meta = _collect_grammar_candidates(candidates, chosen_tense)
 
     if not candidates_with_meta:
-        raise HTTPException(status_code=400, detail="Não há frases disponíveis para este filtro")
+        filters_applied = []
+        if chosen_tense:
+            filters_applied.append(f"tempo verbal '{chosen_tense}'")
+        if chosen_level:
+            filters_applied.append(f"nivel '{chosen_level}'")
+        detail = "Não há frases disponíveis para este filtro."
+        if filters_applied:
+            detail = f"Não há frases disponíveis para o filtro de {' e '.join(filters_applied)}."
+        raise HTTPException(status_code=400, detail=detail)
 
-    selected = random.sample(candidates_with_meta, min(num_sentences, len(candidates_with_meta)))
+    selected = random.sample(candidates_with_meta, min(requested_count, len(candidates_with_meta)))
     items = []
     correct_map = {}
 
     for s, sentence_pt, grammar_points, tense_value in selected:
+        tense_value = tense_value or _extract_sentence_tense(grammar_points, s.english) or "present"
+        if not grammar_points:
+            grammar_points = _infer_grammar_points_from_sentence(s.english, tense_value)
+
         tokens = _tokenize_sentence_builder(s.english)
         shuffled = tokens[:]
         random.shuffle(shuffled)
@@ -1039,6 +1830,7 @@ async def start_grammar_builder(
             "verb": "",
             "tip": tip_value,
             "explanation": explanation_value,
+            "grammar_points": grammar_points,
             "level": mapped_level,
             "tense": tense_value or "",
             "audio_url": s.audio_url,
@@ -1099,6 +1891,23 @@ def submit_grammar_builder(
         if is_correct:
             score += 1
 
+        error_feedback = {}
+        if not is_correct:
+            error_feedback = _build_grammar_error_feedback(
+                expected_sentence=expected_sentence,
+                user_sentence=user_sentence,
+                expected_tokens=[str(t) for t in expected_tokens if str(t).strip()],
+                user_tokens=[str(t).strip() for t in (ans.tokens or []) if str(t).strip()],
+                tip=str(correct.get("tip") or ""),
+                base_explanation=str(correct.get("explanation") or ""),
+                tense=str(correct.get("tense") or ""),
+                grammar_points=[
+                    str(point).strip()
+                    for point in (correct.get("grammar_points") or [])
+                    if str(point).strip()
+                ],
+            )
+
         results.append({
             "item_id": ans.item_id,
             "correct": is_correct,
@@ -1110,6 +1919,10 @@ def submit_grammar_builder(
             "verb": correct.get("verb") or "",
             "level": correct.get("level"),
             "tense": correct.get("tense"),
+            "missing_tokens": error_feedback.get("missing_tokens", []),
+            "extra_tokens": error_feedback.get("extra_tokens", []),
+            "first_mismatch": error_feedback.get("first_mismatch", ""),
+            "detailed_explanation": error_feedback.get("detailed_explanation", ""),
         })
 
     percentage = (score / total) * 100 if total > 0 else 0
@@ -1137,6 +1950,7 @@ def submit_grammar_builder(
     )
     db.add(game_session)
     db.commit()
+    new_achievements = check_achievements(db, current_user.id, stats)
 
     _delete_session(session_id)
 
@@ -1146,6 +1960,7 @@ def submit_grammar_builder(
         percentage=percentage,
         xp_earned=xp,
         results=results,
+        new_achievements=new_achievements,
     )
 
 
@@ -1290,6 +2105,7 @@ def guess_hangman(
     won = "_" not in display
     
     xp_earned = 0
+    new_achievements = []
     if game_over:
         stats = get_or_create_stats(db, current_user.id)
         stats.games_played += 1  # type: ignore[misc]
@@ -1313,6 +2129,7 @@ def guess_hangman(
         )
         db.add(game_session)
         db.commit()
+        new_achievements = check_achievements(db, current_user.id, stats)
         
         _delete_session(session_id)
     
@@ -1327,7 +2144,8 @@ def guess_hangman(
         game_over=game_over,
         won=won,
         word=word if game_over else None,
-        xp_earned=xp_earned
+        xp_earned=xp_earned,
+        new_achievements=new_achievements,
     )
 
 
@@ -1618,6 +2436,14 @@ def submit_matching(
             current_user.current_streak = 1  # type: ignore[misc]
         current_user.last_study_date = reviewed_at  # type: ignore[misc]
 
+        learned_words_count = db.query(func.count(UserProgress.id)).filter(
+            UserProgress.user_id == current_user.id,
+            UserProgress.correct_count >= 3,
+        ).scalar() or 0
+        stats.words_learned = int(learned_words_count)  # type: ignore[misc]
+        if current_user.current_streak > stats.longest_streak:
+            stats.longest_streak = current_user.current_streak  # type: ignore[misc]
+
     is_best = False
     if stats.best_matching_time is None or request.time_spent < stats.best_matching_time:
         stats.best_matching_time = request.time_spent  # type: ignore[misc]
@@ -1646,6 +2472,7 @@ def submit_matching(
     )
     db.add(game_session)
     db.commit()
+    new_achievements = check_achievements(db, current_user.id, stats)
     
     _delete_session(request.session_id)
     
@@ -1654,7 +2481,8 @@ def submit_matching(
         time_spent=request.time_spent,
         moves=request.moves,
         xp_earned=xp,
-        is_best_time=is_best
+        is_best_time=is_best,
+        new_achievements=new_achievements,
     )
 
 
@@ -1783,6 +2611,7 @@ def submit_dictation(
     )
     db.add(game_session)
     db.commit()
+    new_achievements = check_achievements(db, current_user.id, stats)
     
     _delete_session(session_id)
     
@@ -1791,7 +2620,8 @@ def submit_dictation(
         total=total,
         percentage=percentage,
         xp_earned=xp,
-        results=results
+        results=results,
+        new_achievements=new_achievements,
     )
 
 

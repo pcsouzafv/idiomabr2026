@@ -29,6 +29,7 @@ interface User {
   phone_number?: string | null;
   is_active: boolean;
   is_admin: boolean;
+  email_verified: boolean;
   current_streak: number;
   daily_goal: number;
   created_at: string;
@@ -42,6 +43,7 @@ interface CreateUserPayload {
   is_active: boolean;
   is_admin: boolean;
   daily_goal?: number;
+  email_verified?: boolean;
 }
 
 interface UserEditPayload extends Partial<User> {
@@ -139,9 +141,9 @@ export default function AdminUsersPage() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       loadUsers();
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Erro ao deletar usuário:", error);
-      alert("Erro ao deletar usuário");
+      alert(getErrorDetail(error) || "Erro ao deletar usuário");
     }
   };
 
@@ -283,16 +285,22 @@ export default function AdminUsersPage() {
                         </td>
                         <td className="py-3 px-4 text-center text-gray-600">{u.daily_goal}</td>
                         <td className="py-3 px-4 text-center">
-                          <button
-                            onClick={() => toggleActive(u.id, u.is_active)}
-                            className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                              u.is_active
-                                ? "bg-green-100 text-green-700 hover:bg-green-200"
-                                : "bg-red-100 text-red-700 hover:bg-red-200"
-                            }`}
-                          >
-                            {u.is_active ? "✅ Ativo" : "❌ Inativo"}
-                          </button>
+                          {!u.email_verified ? (
+                            <span className="inline-flex px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                              ⏳ Email pendente
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => toggleActive(u.id, u.is_active)}
+                              className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                u.is_active
+                                  ? "bg-green-100 text-green-700 hover:bg-green-200"
+                                  : "bg-red-100 text-red-700 hover:bg-red-200"
+                              }`}
+                            >
+                              {u.is_active ? "✅ Ativo" : "❌ Inativo"}
+                            </button>
+                          )}
                         </td>
                         <td className="py-3 px-4 text-center">
                           <button
@@ -479,6 +487,17 @@ function UserCreateModal({
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
+                  checked={Boolean(formData.email_verified)}
+                  onChange={(e) => setFormData({ ...formData, email_verified: e.target.checked })}
+                  title="Email verificado"
+                  className="w-4 h-4"
+                />
+                <span className="text-sm font-semibold text-gray-700">Email verificado</span>
+              </label>
+
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
                   checked={formData.is_admin}
                   onChange={(e) => setFormData({ ...formData, is_admin: e.target.checked })}
                   title="Admin"
@@ -518,8 +537,15 @@ function UserEditModal({ user, onClose, onSave }: { user: User; onClose: () => v
     daily_goal: user.daily_goal,
     is_active: user.is_active,
     is_admin: user.is_admin,
+    email_verified: user.email_verified,
     password: '',
   });
+
+  const status = !Boolean(formData.email_verified)
+    ? { label: "⏳ Email pendente (nao consegue entrar)", className: "bg-amber-100 text-amber-800" }
+    : formData.is_active
+      ? { label: "✅ Ativo", className: "bg-green-100 text-green-800" }
+      : { label: "❌ Inativo", className: "bg-red-100 text-red-800" };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -535,6 +561,11 @@ function UserEditModal({ user, onClose, onSave }: { user: User; onClose: () => v
       <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="p-8">
           <h2 className="text-3xl font-bold text-gray-800 mb-6">Editar Usuário</h2>
+          <div className="mb-6">
+            <span className={`inline-flex px-3 py-1 rounded-full text-xs font-semibold ${status.className}`}>
+              {status.label}
+            </span>
+          </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -597,6 +628,17 @@ function UserEditModal({ user, onClose, onSave }: { user: User; onClose: () => v
                   className="w-4 h-4"
                 />
                 <span className="text-sm font-semibold text-gray-700">Conta Ativa</span>
+              </label>
+
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={Boolean(formData.email_verified)}
+                  onChange={(e) => setFormData({ ...formData, email_verified: e.target.checked })}
+                  title="Email verificado"
+                  className="w-4 h-4"
+                />
+                <span className="text-sm font-semibold text-gray-700">Email verificado</span>
               </label>
 
               <label className="flex items-center gap-2">

@@ -58,6 +58,25 @@ def verify_password_reset_token(token: str) -> Optional[int]:
         return None
 
 
+def create_email_verification_token(user_id: int, expires_hours: int = 24) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(hours=expires_hours)
+    payload = {"sub": str(user_id), "type": "email_verification", "exp": expire}
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+
+
+def verify_email_verification_token(token: str) -> Optional[int]:
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        if payload.get("type") != "email_verification":
+            return None
+        user_id_raw = payload.get("sub")
+        if user_id_raw is None:
+            return None
+        return int(user_id_raw)
+    except (JWTError, ValueError, TypeError):
+        return None
+
+
 def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
@@ -82,6 +101,11 @@ def get_current_user(
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise credentials_exception
+    if not bool(getattr(user, "is_active", True)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Conta inativa",
+        )
     return user
 
 
@@ -104,7 +128,12 @@ def get_current_user_optional(
     except JWTError:
         return None
 
-    return db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        return None
+    if not bool(getattr(user, "is_active", True)):
+        return None
+    return user
 
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:

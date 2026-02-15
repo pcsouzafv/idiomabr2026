@@ -28,8 +28,8 @@ export default function AdminReadingWritingPage() {
             >
               ← Voltar ao Painel Administrativo
             </Link>
-            <h1 className="text-4xl font-bold text-gray-800 mb-2">Leitura e Escrita</h1>
-            <p className="text-gray-600">Configuração do módulo (placeholder)</p>
+            <h1 className="text-4xl font-bold text-gray-800 mb-2">Slow Listening & Speaking Practice</h1>
+            <p className="text-gray-600">Configuração do módulo</p>
           </div>
         </div>
 

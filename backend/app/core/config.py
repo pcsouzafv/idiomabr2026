@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # Frontend base URL (for password reset links)
     frontend_base_url: str = "http://localhost:3000"
 
-    # SMTP (password reset emails)
+    # SMTP (password reset + support emails)
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
@@ -40,6 +40,25 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     smtp_tls: bool = True
     smtp_ssl: bool = False
+    support_email: str = ""
+
+    # Anti-bot (Cloudflare Turnstile)
+    turnstile_secret_key: str = ""
+    turnstile_verify_url: str = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+
+    # Auth rate-limits (per IP/email)
+    auth_register_limit_per_ip: int = 8
+    auth_register_limit_per_email: int = 3
+    auth_register_window_seconds: int = 60 * 60
+    auth_login_limit_per_ip: int = 40
+    auth_login_limit_per_email: int = 15
+    auth_login_window_seconds: int = 15 * 60
+    auth_forgot_limit_per_ip: int = 8
+    auth_forgot_window_seconds: int = 15 * 60
+    auth_resend_limit_per_ip: int = 6
+    auth_resend_limit_per_email: int = 3
+    auth_resend_window_seconds: int = 15 * 60
+    auth_require_email_verification: bool = True
 
     # AI Services
     deepseek_api_key: str = ""
@@ -54,9 +73,14 @@ class Settings(BaseSettings):
     conversation_temperature: float = 0.6
     conversation_timeout_seconds: float = 20.0
     conversation_max_retries: int = 1
+    # AI usage monitoring (Admin)
+    ai_usage_budget_tokens: int = 0
+    ai_usage_warning_percent: float = 80.0
+    ai_usage_critical_percent: float = 95.0
     # TTS (OpenAI) - keep explicit so it doesn't inherit any OpenAI-compatible LLM base_url (e.g. DeepSeek)
     openai_tts_base_url: str = "https://api.openai.com/v1"
     openai_tts_model: str = "tts-1"
+    openai_tts_speed: float = 0.88
     # Lemonfox (STT/TTS)
     lemonfox_api_key: str = ""
     lemonfox_base_url: str = "https://api.lemonfox.ai/v1"

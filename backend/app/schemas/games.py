@@ -26,6 +26,7 @@ class UserStatsResponse(UserStatsBase):
     best_quiz_score: int = 0
     best_hangman_streak: int = 0
     best_matching_time: Optional[int] = None
+    perfect_games: int = 0
     xp_to_next_level: int = 0
     level_progress: float = 0.0
     
@@ -166,6 +167,7 @@ class HangmanGuessResponse(BaseModel):
     won: bool
     word: Optional[str] = None
     xp_earned: int = 0
+    new_achievements: List[AchievementResponse] = []
 
 
 # ============== Matching ==============
@@ -204,6 +206,7 @@ class MatchingResultResponse(BaseModel):
     moves: int
     xp_earned: int
     is_best_time: bool = False
+    new_achievements: List[AchievementResponse] = []
 
 
 # ============== Ditado ==============
@@ -243,6 +246,7 @@ class DictationResultResponse(BaseModel):
     percentage: float
     xp_earned: int
     results: List[dict]
+    new_achievements: List[AchievementResponse] = []
 
 
 # ============== Montar Frases (Sentence Builder) ==============
@@ -280,6 +284,7 @@ class SentenceBuilderSubmitResponse(BaseModel):
     percentage: float
     xp_earned: int
     results: List[dict]
+    new_achievements: List[AchievementResponse] = []
 
 
 # ============== Gramática (Grammar Builder) ==============
@@ -320,6 +325,7 @@ class GrammarBuilderSubmitResponse(BaseModel):
     percentage: float
     xp_earned: int
     results: List[dict]
+    new_achievements: List[AchievementResponse] = []
 
 
 # ============== Desafio Diário ==============

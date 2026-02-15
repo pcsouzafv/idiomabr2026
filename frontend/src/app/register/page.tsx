@@ -1,11 +1,32 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Script from 'next/script';
 import { useAuthStore } from '@/store/authStore';
 import { BookOpen, Mail, Lock, User, Eye, EyeOff, Phone } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+type TurnstileApi = {
+  render: (
+    element: HTMLElement,
+    options: {
+      sitekey: string;
+      theme?: 'light' | 'dark' | 'auto';
+      callback?: (token: string) => void;
+      'expired-callback'?: () => void;
+      'error-callback'?: () => void;
+    }
+  ) => string;
+  reset: (widgetId?: string) => void;
+};
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileApi;
+  }
+}
 
 export default function RegisterPage() {
   const [name, setName] = useState('');
@@ -13,11 +34,33 @@ export default function RegisterPage() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [captchaToken, setCaptchaToken] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  
+
+  const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || '';
+  const captchaContainerRef = useRef<HTMLDivElement | null>(null);
+  const captchaWidgetIdRef = useRef<string | null>(null);
+
   const { register } = useAuthStore();
   const router = useRouter();
+
+  const renderCaptcha = useCallback(() => {
+    if (!turnstileSiteKey || !captchaContainerRef.current || !window.turnstile) {
+      return;
+    }
+    if (captchaWidgetIdRef.current) {
+      return;
+    }
+
+    captchaWidgetIdRef.current = window.turnstile.render(captchaContainerRef.current, {
+      sitekey: turnstileSiteKey,
+      theme: 'auto',
+      callback: (token: string) => setCaptchaToken(token),
+      'expired-callback': () => setCaptchaToken(''),
+      'error-callback': () => setCaptchaToken(''),
+    });
+  }, [turnstileSiteKey]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,23 +79,47 @@ export default function RegisterPage() {
       toast.error('Informe um telefone válido');
       return;
     }
+
+    if (turnstileSiteKey && !captchaToken) {
+      toast.error('Confirme o captcha antes de continuar');
+      return;
+    }
     
     setIsLoading(true);
 
     try {
-      await register(email, name, password, phoneNumber);
+      const normalizedEmail = email.trim().toLowerCase();
+      const result = await register(email, name, password, phoneNumber, captchaToken || undefined);
+      if (result.requiresEmailVerification) {
+        toast.success(`Conta criada! Enviamos um e-mail de confirmação para ${normalizedEmail}.`);
+        router.push(`/login?verification=sent&email=${encodeURIComponent(normalizedEmail)}`);
+        return;
+      }
+
       toast.success('Conta criada com sucesso!');
       router.push('/dashboard');
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } };
       toast.error(err.response?.data?.detail || 'Erro ao criar conta');
     } finally {
+      if (captchaWidgetIdRef.current && window.turnstile) {
+        window.turnstile.reset(captchaWidgetIdRef.current);
+      }
+      setCaptchaToken('');
       setIsLoading(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-50 via-white to-primary-100 flex items-center justify-center px-4 py-8">
+      {turnstileSiteKey && (
+        <Script
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+          strategy="afterInteractive"
+          onLoad={renderCaptcha}
+        />
+      )}
+
       <div className="w-full max-w-md">
         {/* Logo */}
         <Link href="/" className="flex items-center justify-center gap-2 mb-8">
@@ -163,6 +230,17 @@ export default function RegisterPage() {
                 />
               </div>
             </div>
+
+            {turnstileSiteKey ? (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Verificação de segurança</label>
+                <div ref={captchaContainerRef} className="min-h-[65px]" />
+              </div>
+            ) : (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Validação anti-bot indisponível neste ambiente.
+              </p>
+            )}
 
             <button
               type="submit"

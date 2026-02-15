@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/authStore';
 import api from '@/lib/api';
+import ThemeToggle from '@/components/ThemeToggle';
 import {
   ArrowLeft,
   Brain,
@@ -94,6 +95,9 @@ export default function SentencesPage() {
   const chunksRef = useRef<BlobPart[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const browserUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsAudioUrlRef = useRef<string | null>(null);
   const rafRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -118,6 +122,129 @@ export default function SentencesPage() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, isAskingAI, isAnalyzingSentence]);
+
+  const stopBrowserSpeech = useCallback(() => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    browserUtteranceRef.current = null;
+  }, []);
+
+  const speakWithBrowser = useCallback(
+    (text: string, language: 'en-US' | 'pt-BR' = 'en-US') => {
+      const normalizedText = text.trim();
+      if (!normalizedText) return;
+
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+        toast.error('Seu navegador não suporta leitura de áudio');
+        return;
+      }
+
+      stopBrowserSpeech();
+
+      const utterance = new SpeechSynthesisUtterance(normalizedText);
+      utterance.lang = language;
+      utterance.rate = language === 'en-US' ? 0.9 : 1;
+
+      const voices = window.speechSynthesis.getVoices();
+      const preferredVoice =
+        voices.find((voice) => voice.lang.toLowerCase().startsWith(language.toLowerCase())) ||
+        voices.find((voice) => voice.lang.toLowerCase().startsWith(language.slice(0, 2).toLowerCase()));
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
+
+      utterance.onend = () => {
+        if (browserUtteranceRef.current === utterance) {
+          browserUtteranceRef.current = null;
+        }
+      };
+
+      utterance.onerror = () => {
+        if (browserUtteranceRef.current === utterance) {
+          browserUtteranceRef.current = null;
+        }
+      };
+
+      browserUtteranceRef.current = utterance;
+      window.speechSynthesis.speak(utterance);
+    },
+    [stopBrowserSpeech]
+  );
+
+  const cleanupTtsAudio = useCallback(() => {
+    const audio = ttsAudioRef.current;
+    if (audio) {
+      audio.onended = null;
+      audio.onerror = null;
+      try {
+        audio.pause();
+        audio.removeAttribute('src');
+        audio.load();
+      } catch {
+        // ignore
+      }
+    }
+    ttsAudioRef.current = null;
+
+    if (ttsAudioUrlRef.current) {
+      URL.revokeObjectURL(ttsAudioUrlRef.current);
+      ttsAudioUrlRef.current = null;
+    }
+  }, []);
+
+  const stopAudioPlayback = useCallback(() => {
+    cleanupTtsAudio();
+    setIsPlayingAudio(false);
+  }, [cleanupTtsAudio]);
+
+  const speakWithAI = useCallback(async (text: string) => {
+    const normalizedText = text.trim();
+    if (!normalizedText) return;
+
+    stopBrowserSpeech();
+    stopAudioPlayback();
+    setIsPlayingAudio(true);
+
+    try {
+      const response = await api.post('/api/sentences/ai/speak', { text: normalizedText }, { responseType: 'blob' });
+      const audioBlob = new Blob([response.data], { type: 'audio/mpeg' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      ttsAudioUrlRef.current = audioUrl;
+
+      const audio = new Audio(audioUrl);
+      ttsAudioRef.current = audio;
+
+      audio.onended = () => {
+        cleanupTtsAudio();
+        setIsPlayingAudio(false);
+      };
+      audio.onerror = () => {
+        cleanupTtsAudio();
+        setIsPlayingAudio(false);
+        toast.error('Não foi possível reproduzir o áudio da IA');
+      };
+
+      await audio.play();
+    } catch (error) {
+      console.error('Erro ao gerar áudio da IA:', error);
+      const status = getHttpStatus(error);
+      stopAudioPlayback();
+      if (status === 503 || status === 400) {
+        toast.error('TTS da IA indisponível. Verifique OPENAI_API_KEY ou LEMONFOX_API_KEY.');
+      } else if (status === 429) {
+        toast.error('TTS da IA no limite de uso agora. Tente novamente em instantes.');
+      } else {
+        toast.error('Erro ao gerar áudio da IA');
+      }
+    }
+  }, [cleanupTtsAudio, stopAudioPlayback, stopBrowserSpeech]);
+
+  useEffect(() => {
+    return () => {
+      stopBrowserSpeech();
+      stopAudioPlayback();
+    };
+  }, [stopAudioPlayback, stopBrowserSpeech]);
 
   const levels = useMemo(
     () => filtersData?.levels ?? [],
@@ -233,38 +360,9 @@ export default function SentencesPage() {
     }
   };
 
-  const playAudio = async (text: string) => {
-    try {
-      setIsPlayingAudio(true);
-      const response = await api.post(
-        '/api/sentences/ai/speak',
-        { text },
-        { responseType: 'blob' }
-      );
-
-      const audioBlob = response.data as Blob;
-      const objectUrl = URL.createObjectURL(audioBlob);
-
-      const audio = new Audio(objectUrl);
-      audio.onended = () => {
-        setIsPlayingAudio(false);
-        URL.revokeObjectURL(objectUrl);
-      };
-      audio.onerror = () => {
-        setIsPlayingAudio(false);
-        URL.revokeObjectURL(objectUrl);
-      };
-      await audio.play();
-    } catch (error) {
-      const status = getHttpStatus(error);
-      if (status !== 503) {
-        console.log('Audio playback not available:', error);
-      }
-      setIsPlayingAudio(false);
-    }
-  };
-
   const analyzeSentence = async (sentence: Sentence) => {
+    stopBrowserSpeech();
+    stopAudioPlayback();
     setSelectedSentence(sentence);
     setAiResponse('');
     setChatMessages([]);
@@ -282,7 +380,6 @@ export default function SentencesPage() {
           content: message,
         },
       ]);
-      void playAudio(message);
       toast.success('Professora Sarah está pronta!');
     } catch (error) {
       console.error('Erro:', error);
@@ -430,8 +527,6 @@ export default function SentencesPage() {
           content: assistantMessage,
         },
       ]);
-
-      void playAudio(assistantMessage);
       toast.success('Sarah respondeu!');
     } catch (error) {
       console.error('Erro:', error);
@@ -450,80 +545,83 @@ export default function SentencesPage() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 transition-colors">
         <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_42%,_#e0e7ff_100%)]">
-      <header className="sticky top-0 z-50 border-b border-white/60 bg-white/90 backdrop-blur-sm">
-        <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-3 flex items-center gap-3">
-          <Link
-            href="/dashboard"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Link>
-          <div className="flex items-center gap-2">
-            <Brain className="h-6 w-6 text-primary-600" />
-            <div>
-              <p className="font-bold text-gray-900 leading-tight">Estudar Frases com IA</p>
-              <p className="text-xs text-gray-500 leading-tight">Treine contexto, gramática e pronúncia</p>
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_42%,_#e0e7ff_100%)] dark:bg-[radial-gradient(circle_at_top,_#0f172a_0%,_#020617_45%,_#111827_100%)] transition-colors">
+      <header className="sticky top-0 z-50 border-b border-white/60 bg-white/90 dark:border-slate-800/70 dark:bg-slate-950/85 backdrop-blur-sm transition-colors">
+        <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Link
+              href="/dashboard"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800 hover:text-gray-900 dark:hover:text-white transition"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Link>
+            <div className="flex items-center gap-2">
+              <Brain className="h-6 w-6 text-primary-600 dark:text-primary-400" />
+              <div>
+                <p className="font-bold text-gray-900 dark:text-white leading-tight">Estudar Frases com IA</p>
+                <p className="text-xs text-gray-500 dark:text-gray-300 leading-tight">Treine contexto, gramática e pronúncia</p>
+              </div>
             </div>
           </div>
+          <ThemeToggle />
         </div>
       </header>
 
       <main className="container mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6">
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(320px,430px)_1fr] gap-4 sm:gap-5">
-          <section className="bg-white/90 backdrop-blur-sm rounded-2xl border border-white/70 shadow-sm p-4 sm:p-5">
+          <section className="bg-white/90 dark:bg-slate-900/85 backdrop-blur-sm rounded-2xl border border-white/70 dark:border-slate-700/70 shadow-sm p-4 sm:p-5 transition-colors">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg sm:text-xl font-bold text-gray-900 flex items-center gap-2">
+              <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                 <BookOpen className="h-5 w-5" />
                 Frases Disponíveis
               </h2>
-              <span className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-700">
+              <span className="text-xs px-2 py-1 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200">
                 {filteredSentences.length} resultados
               </span>
             </div>
 
             <div className="grid grid-cols-3 gap-2 mb-4">
-              <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
-                <p className="text-xs text-gray-500">Total</p>
-                <p className="text-base font-bold text-gray-900">{filtersData?.total ?? sentences.length}</p>
+              <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/70 px-3 py-2 transition-colors">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Total</p>
+                <p className="text-base font-bold text-gray-900 dark:text-gray-100">{filtersData?.total ?? sentences.length}</p>
               </div>
-              <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
-                <p className="text-xs text-gray-500">Níveis</p>
-                <p className="text-base font-bold text-gray-900">{levels.length}</p>
+              <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/70 px-3 py-2 transition-colors">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Níveis</p>
+                <p className="text-base font-bold text-gray-900 dark:text-gray-100">{levels.length}</p>
               </div>
-              <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
-                <p className="text-xs text-gray-500">Temas</p>
-                <p className="text-base font-bold text-gray-900">{categories.length}</p>
+              <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/70 px-3 py-2 transition-colors">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Temas</p>
+                <p className="text-base font-bold text-gray-900 dark:text-gray-100">{categories.length}</p>
               </div>
             </div>
 
             <div className="space-y-2 mb-4">
               <div className="relative">
-                <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="h-4 w-4 text-gray-400 dark:text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchInput}
                   onChange={(event) => setSearchInput(event.target.value)}
                   placeholder="Buscar por inglês, português, nível ou categoria..."
-                  className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                  className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-300"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="relative">
-                  <SlidersHorizontal className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <SlidersHorizontal className="h-4 w-4 text-gray-400 dark:text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
                   <select
                     title="Filtrar por nível"
                     value={levelFilter}
                     onChange={(event) => setLevelFilter(event.target.value)}
-                    className="w-full appearance-none pl-9 pr-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                    className="w-full appearance-none pl-9 pr-3 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-300"
                   >
                     <option value="all">Todos os níveis</option>
                     {levels.map((lv) => (
@@ -538,7 +636,7 @@ export default function SentencesPage() {
                   title="Filtrar por categoria"
                   value={categoryFilter}
                   onChange={(event) => setCategoryFilter(event.target.value)}
-                  className="w-full appearance-none px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                  className="w-full appearance-none px-3 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-300"
                 >
                   <option value="all">Todas as categorias</option>
                   {categories.map((cat) => (
@@ -555,7 +653,7 @@ export default function SentencesPage() {
                 <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
               </div>
             ) : filteredSentences.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-6 text-center text-sm text-gray-600">
+              <div className="rounded-xl border border-dashed border-gray-300 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/70 p-6 text-center text-sm text-gray-600 dark:text-gray-300 transition-colors">
                 Nenhuma frase encontrada para o filtro atual.
               </div>
             ) : (
@@ -566,31 +664,31 @@ export default function SentencesPage() {
                     onClick={() => void analyzeSentence(sentence)}
                     className={`rounded-xl border p-3 cursor-pointer transition ${
                       selectedSentence?.id === sentence.id
-                        ? 'border-primary-500 bg-primary-50 shadow-sm'
-                        : 'border-gray-200 bg-white hover:border-primary-300 hover:bg-gray-50'
+                        ? 'border-primary-500 dark:border-primary-400 bg-primary-50 dark:bg-primary-500/20 shadow-sm'
+                        : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-primary-300 dark:hover:border-primary-500 hover:bg-gray-50 dark:hover:bg-slate-800'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2 mb-2">
-                      <span className="text-xs font-semibold px-2 py-1 bg-blue-100 text-blue-700 rounded-md">
+                      <span className="text-xs font-semibold px-2 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-200 rounded-md">
                         {sentence.level}
                       </span>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500">{sentence.category}</span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">{sentence.category}</span>
                         <button
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            void playAudio(sentence.english);
+                            speakWithBrowser(sentence.english, 'en-US');
                           }}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-700"
                           title="Ouvir frase"
                         >
                           <Volume2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>
-                    <p className="font-semibold text-gray-900 leading-snug">{sentence.english}</p>
-                    <p className="text-sm text-gray-600 mt-1 leading-snug">{sentence.portuguese}</p>
+                    <p className="font-semibold text-gray-900 dark:text-white leading-snug">{sentence.english}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-300 mt-1 leading-snug">{sentence.portuguese}</p>
                   </div>
                 ))}
 
@@ -598,7 +696,7 @@ export default function SentencesPage() {
                   <button
                     onClick={loadMore}
                     disabled={loadingMore}
-                    className="w-full py-2.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                    className="w-full py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-800 transition disabled:opacity-50 flex items-center justify-center gap-2"
                   >
                     {loadingMore ? (
                       <>
@@ -614,37 +712,37 @@ export default function SentencesPage() {
             )}
           </section>
 
-          <section className="bg-white/90 backdrop-blur-sm rounded-2xl border border-white/70 shadow-sm p-4 sm:p-5 flex flex-col">
+          <section className="bg-white/90 dark:bg-slate-900/85 backdrop-blur-sm rounded-2xl border border-white/70 dark:border-slate-700/70 shadow-sm p-4 sm:p-5 flex flex-col transition-colors">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg sm:text-xl font-bold text-gray-900 flex items-center gap-2">
+              <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                 <MessageSquare className="h-5 w-5" />
                 Professor de IA
               </h2>
               {selectedSentence ? (
-                <span className="text-xs px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700">
+                <span className="text-xs px-2 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
                   Frase ativa
                 </span>
               ) : (
-                <span className="text-xs px-2 py-1 rounded-lg bg-amber-100 text-amber-700">
+                <span className="text-xs px-2 py-1 rounded-lg bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
                   Selecione uma frase
                 </span>
               )}
             </div>
 
             {selectedSentence && (
-              <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 mb-1">Frase selecionada</p>
-                <p className="font-semibold text-blue-950">{selectedSentence.english}</p>
-                <p className="text-sm text-blue-800 mt-1">{selectedSentence.portuguese}</p>
+              <div className="mb-4 rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50 dark:bg-blue-900/20 p-3 transition-colors">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-200 mb-1">Frase selecionada</p>
+                <p className="font-semibold text-blue-950 dark:text-blue-100">{selectedSentence.english}</p>
+                <p className="text-sm text-blue-800 dark:text-blue-200 mt-1">{selectedSentence.portuguese}</p>
               </div>
             )}
 
             {selectedSentence && (
-              <div className="mb-4 p-3 rounded-xl border border-gray-200 bg-gray-50">
+              <div className="mb-4 p-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/70 transition-colors">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-gray-800">Treinar pronúncia</p>
-                    <p className="text-xs text-gray-600">Grave sua voz e receba feedback detalhado.</p>
+                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">Treinar pronúncia</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-300">Grave sua voz e receba feedback detalhado.</p>
                   </div>
                   {!isRecording ? (
                     <button
@@ -658,7 +756,7 @@ export default function SentencesPage() {
                   ) : (
                     <button
                       onClick={stopRecorder}
-                      className="px-3 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-800 transition inline-flex items-center gap-2"
+                      className="px-3 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200 transition inline-flex items-center gap-2"
                     >
                       <Square className="h-4 w-4" />
                       Parar
@@ -667,7 +765,7 @@ export default function SentencesPage() {
                 </div>
 
                 {isAnalyzingPronunciation ? (
-                  <div className="mt-3 text-sm text-gray-600 inline-flex items-center gap-2">
+                  <div className="mt-3 text-sm text-gray-600 dark:text-gray-300 inline-flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Analisando áudio...
                   </div>
@@ -675,8 +773,8 @@ export default function SentencesPage() {
 
                 {isRecording ? (
                   <div className="mt-3">
-                    <p className="text-xs text-gray-600 mb-1">Nível do microfone</p>
-                    <div className="h-2 w-full rounded-full bg-gray-200 overflow-hidden">
+                    <p className="text-xs text-gray-600 dark:text-gray-300 mb-1">Nível do microfone</p>
+                    <div className="h-2 w-full rounded-full bg-gray-200 dark:bg-slate-700 overflow-hidden">
                       <div
                         className="h-full rounded-full bg-emerald-500 transition-[width] duration-100"
                         style={{ width: `${Math.max(6, audioLevel)}%` }}
@@ -688,18 +786,18 @@ export default function SentencesPage() {
                 {pronunciationResult ? (
                   <div className="mt-4 space-y-3">
                     <div>
-                      <p className="text-xs font-semibold text-gray-700">Transcrição (STT)</p>
-                      <p className="text-sm text-gray-800">{pronunciationResult.transcript || '—'}</p>
+                      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">Transcrição (STT)</p>
+                      <p className="text-sm text-gray-800 dark:text-gray-100">{pronunciationResult.transcript || '—'}</p>
                     </div>
                     <div>
-                      <p className="text-xs font-semibold text-gray-700">Similaridade</p>
-                      <p className="text-sm text-gray-800">
+                      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">Similaridade</p>
+                      <p className="text-sm text-gray-800 dark:text-gray-100">
                         {pronunciationResult.similarity === null ? '—' : `${pronunciationResult.similarity}%`}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs font-semibold text-gray-700">Feedback</p>
-                      <div className="whitespace-pre-wrap text-sm text-gray-800">{pronunciationResult.feedback}</div>
+                      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">Feedback</p>
+                      <div className="whitespace-pre-wrap text-sm text-gray-800 dark:text-gray-100">{pronunciationResult.feedback}</div>
                     </div>
                   </div>
                 ) : null}
@@ -712,21 +810,21 @@ export default function SentencesPage() {
                   key={prompt}
                   type="button"
                   onClick={() => setUserMessage(prompt)}
-                  className="shrink-0 text-xs px-3 py-1.5 rounded-full border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                  className="shrink-0 text-xs px-3 py-1.5 rounded-full border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-800"
                 >
                   {prompt}
                 </button>
               ))}
             </div>
 
-            <div className="flex-1 min-h-[360px] max-h-[58vh] overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-3 sm:p-4">
+            <div className="flex-1 min-h-[360px] max-h-[58vh] overflow-y-auto rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/70 p-3 sm:p-4 transition-colors">
               {isAnalyzingSentence ? (
-                <div className="h-full min-h-[280px] flex flex-col items-center justify-center text-gray-600">
+                <div className="h-full min-h-[280px] flex flex-col items-center justify-center text-gray-600 dark:text-gray-300">
                   <Loader2 className="h-8 w-8 animate-spin mb-2 text-primary-600" />
                   Sarah está analisando a frase...
                 </div>
               ) : chatMessages.length === 0 ? (
-                <div className="h-full min-h-[280px] flex flex-col items-center justify-center text-gray-400">
+                <div className="h-full min-h-[280px] flex flex-col items-center justify-center text-gray-400 dark:text-gray-500">
                   <Sparkles className="h-12 w-12 mb-2" />
                   <p className="text-center max-w-md">
                     Selecione uma frase e comece a conversar com a Professora Sarah.
@@ -743,7 +841,7 @@ export default function SentencesPage() {
                         className={`max-w-[92%] sm:max-w-[82%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap leading-relaxed ${
                           message.role === 'user'
                             ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white'
-                            : 'bg-white border border-gray-200 text-gray-800'
+                            : 'bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-gray-800 dark:text-gray-100'
                         }`}
                       >
                         {message.content}
@@ -752,7 +850,7 @@ export default function SentencesPage() {
                   ))}
                   {isAskingAI && (
                     <div className="flex justify-start">
-                      <div className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-2 text-sm text-gray-600">
+                      <div className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-sm text-gray-600 dark:text-gray-200">
                         <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
                         Sarah está respondendo...
                       </div>
@@ -766,9 +864,9 @@ export default function SentencesPage() {
             {aiResponse && (
               <div className="mt-3 flex justify-end">
                 <button
-                  onClick={() => void playAudio(aiResponse)}
+                  onClick={() => void speakWithAI(aiResponse)}
                   disabled={isPlayingAudio}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs sm:text-sm bg-primary-100 text-primary-700 hover:bg-primary-200 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs sm:text-sm bg-primary-100 dark:bg-primary-500/20 text-primary-700 dark:text-primary-300 hover:bg-primary-200 dark:hover:bg-primary-500/30 disabled:opacity-50 transition-colors"
                 >
                   {isPlayingAudio ? (
                     <>
@@ -795,7 +893,7 @@ export default function SentencesPage() {
                     ? 'Pergunte sobre a frase, gramática, pronúncia ou contexto...'
                     : 'Você também pode conversar sem frase selecionada...'
                 }
-                className="w-full px-4 py-3 rounded-xl border border-gray-300 bg-white resize-none focus:outline-none focus:ring-2 focus:ring-primary-300"
+                className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 resize-none focus:outline-none focus:ring-2 focus:ring-primary-300"
                 rows={2}
                 disabled={isAskingAI || isAnalyzingSentence}
               />
@@ -809,7 +907,7 @@ export default function SentencesPage() {
               </button>
             </div>
 
-            <p className="mt-2 text-xs text-gray-500 text-center">
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 text-center">
               A Professora Sarah conversa com você e pode responder em áudio. Use Enter para enviar.
             </p>
           </section>

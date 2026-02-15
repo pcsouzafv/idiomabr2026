@@ -3,10 +3,10 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { BookOpen, Lock, Mail, Phone, Target, User as UserIcon } from 'lucide-react';
+import { BookOpen, LifeBuoy, Lock, Mail, Phone, Target, User as UserIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
-import { authApi } from '@/lib/api';
+import { authApi, supportApi } from '@/lib/api';
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -21,6 +21,10 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
+
+  const [supportSubject, setSupportSubject] = useState('');
+  const [supportMessage, setSupportMessage] = useState('');
+  const [sendingSupport, setSendingSupport] = useState(false);
 
   useEffect(() => {
     fetchUser();
@@ -84,6 +88,39 @@ export default function ProfilePage() {
       toast.error(err.response?.data?.detail || 'Erro ao alterar senha');
     } finally {
       setSavingPassword(false);
+    }
+  };
+
+  const handleSupportSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const subject = supportSubject.trim();
+    const message = supportMessage.trim();
+
+    if (subject.length < 5) {
+      toast.error('Assunto deve ter pelo menos 5 caracteres');
+      return;
+    }
+    if (message.length < 10) {
+      toast.error('Mensagem deve ter pelo menos 10 caracteres');
+      return;
+    }
+
+    setSendingSupport(true);
+    try {
+      const response = await supportApi.contact({
+        subject,
+        message,
+        category: 'perfil',
+        context_url: '/profile',
+      });
+      toast.success(response.data?.message || 'Mensagem enviada ao suporte');
+      setSupportSubject('');
+      setSupportMessage('');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Erro ao enviar mensagem ao suporte');
+    } finally {
+      setSendingSupport(false);
     }
   };
 
@@ -240,6 +277,59 @@ export default function ProfilePage() {
                   className="w-full py-3 bg-gray-900 text-white rounded-lg font-semibold hover:bg-gray-800 transition disabled:opacity-50"
                 >
                   {savingPassword ? 'Atualizando...' : 'Atualizar senha'}
+                </button>
+              </form>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-lg p-6 md:col-span-2">
+              <h2 className="text-xl font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                <LifeBuoy className="h-5 w-5 text-primary-600" />
+                Suporte
+              </h2>
+              <p className="text-sm text-gray-600 mb-4">
+                Precisa de ajuda? Envie uma mensagem e nossa equipe respondera por email.
+              </p>
+
+              <form onSubmit={handleSupportSubmit} className="space-y-4">
+                <div>
+                  <label htmlFor="support-subject" className="block text-sm font-medium text-gray-700 mb-2">
+                    Assunto
+                  </label>
+                  <input
+                    id="support-subject"
+                    type="text"
+                    value={supportSubject}
+                    onChange={(e) => setSupportSubject(e.target.value)}
+                    placeholder="Ex: Nao recebi meu link de redefinicao"
+                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    minLength={5}
+                    maxLength={140}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="support-message" className="block text-sm font-medium text-gray-700 mb-2">
+                    Mensagem
+                  </label>
+                  <textarea
+                    id="support-message"
+                    value={supportMessage}
+                    onChange={(e) => setSupportMessage(e.target.value)}
+                    placeholder="Descreva o problema com detalhes."
+                    className="w-full px-4 py-3 border rounded-lg min-h-[140px] focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    minLength={10}
+                    maxLength={5000}
+                    required
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={sendingSupport}
+                  className="w-full md:w-auto px-6 py-3 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition disabled:opacity-50"
+                >
+                  {sendingSupport ? 'Enviando...' : 'Enviar mensagem ao suporte'}
                 </button>
               </form>
             </div>

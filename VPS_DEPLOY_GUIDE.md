@@ -56,7 +56,12 @@ nano .env
 Minimo obrigatorio:
 - POSTGRES_PASSWORD (senha forte)
 - SECRET_KEY (string longa e aleatoria)
+- ENVIRONMENT=production
 - NEXT_PUBLIC_API_URL=https://idiomasbr.com
+- FRONTEND_BASE_URL=https://idiomasbr.com
+- SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM
+- TURNSTILE_SECRET_KEY
+- NEXT_PUBLIC_TURNSTILE_SITE_KEY
 
 Observacao importante:
 - NEXT_PUBLIC_API_URL e embutido no build do Next.js.
@@ -102,6 +107,14 @@ sudo systemctl reload caddy
 
 ```bash
 docker compose up -d --build
+```
+
+Aplicar migration de verificacao de e-mail:
+
+```bash
+docker compose exec -T postgres \
+  psql -U "${POSTGRES_USER:-idiomasbr}" -d "${POSTGRES_DB:-idiomasbr}" \
+  -c "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP;"
 ```
 
 Conferir:

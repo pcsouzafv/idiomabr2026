@@ -62,16 +62,6 @@ const games = [
     xp: '15-150 XP'
   },
   {
-    id: 'sentence-builder',
-    name: 'Montar Frases',
-    description: 'Monte frases em inglês a partir de peças e uma dica em português',
-    icon: Sparkles,
-    color: 'from-green-500 to-emerald-600',
-    href: '/games/sentence-builder',
-    difficulty: 'Médio',
-    xp: '20-80 XP'
-  },
-  {
     id: 'grammar-builder',
     name: 'Gramática',
     description: 'Construa frases com foco em verbos, tempos e ordem correta',

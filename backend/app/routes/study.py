@@ -15,6 +15,8 @@ from app.services.spaced_repetition import calculate_next_review
 from app.schemas.review import ReviewCreate, ReviewResponse, StudySession, StudyCard, ProgressStats
 from app.schemas.word import WordResponse
 from app.services.word_examples import get_best_word_example, needs_example_regeneration
+from app.routes.stats import get_or_create_stats
+from app.services.achievements import check_and_unlock_achievements
 
 router = APIRouter(prefix="/api/study", tags=["Study"])
 
@@ -186,8 +188,23 @@ def submit_review(
         current_user.current_streak = 1  # type: ignore[assignment]
 
     current_user.last_study_date = datetime.now(timezone.utc)  # type: ignore[assignment]
+
+    # Sincroniza estatísticas de gamificação para progresso de conquistas.
+    stats = get_or_create_stats(db, current_user.id)
+    stats.total_reviews += 1  # type: ignore[assignment]
+    if review_data.difficulty in ["easy", "medium"]:
+        stats.correct_answers += 1  # type: ignore[assignment]
+
+    learned_words_count = db.query(func.count(UserProgress.id)).filter(
+        UserProgress.user_id == current_user.id,
+        UserProgress.correct_count >= 3
+    ).scalar() or 0
+    stats.words_learned = int(learned_words_count)  # type: ignore[assignment]
+    if current_user.current_streak > stats.longest_streak:
+        stats.longest_streak = current_user.current_streak  # type: ignore[assignment]
     
     db.commit()
+    check_and_unlock_achievements(db, current_user.id)
     db.refresh(review)
     
     return review
@@ -209,10 +226,10 @@ def get_progress_stats(
         UserProgress.user_id == current_user.id
     ).count()
 
-    # Total de palavras aprendidas/dominadas (repetitions >= 3)
+    # Total de palavras aprendidas (3+ acertos acumulados)
     total_learned = db.query(UserProgress).filter(
         UserProgress.user_id == current_user.id,
-        UserProgress.repetitions >= 3
+        UserProgress.correct_count >= 3
     ).count()
     
     # Palavras estudadas hoje
